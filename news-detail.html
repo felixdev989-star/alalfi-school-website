@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>خبر — مدرسة الالفي الثانوية المشتركة</title>
+<link rel="icon" type="image/png" sizes="256x256" href="images/favicon.png?v=20261111">
+<link rel="icon" type="image/svg+xml" href="images/logo.svg?v=20261111">
+<link rel="shortcut icon" type="image/png" href="images/favicon.png?v=20261111">
+<link rel="apple-touch-icon" href="images/favicon.png?v=20261111">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/editorial.css">
+</head>
+<body class="page-news">
+<nav class="navbar">
+  <div class="container">
+    <a href="index.html" class="logo">
+      <img src="images/ministry-logo.png" alt="شعار وزارة التربية والتعليم" class="ministry-logo-nav">
+      <div class="logo-icon"><img src="images/logo.svg" alt="شعار مدرسة الالفي الثانوية المشتركة"></div>
+      <span class="logo-text">مدرسة الالفي<small>الثانوية المشتركة</small></span>
+    </a>
+    <button class="nav-toggle" aria-label="القائمة">☰</button>
+    <div class="nav-links">
+      <a href="index.html">الرئيسية</a>
+      <a href="about.html">من نحن</a>
+      <a href="about.html#staff-section">المدرسون</a>
+      <a href="programs.html">البرامج</a>
+      <a href="news.html">الأخبار</a>
+      <a href="gallery.html">المعرض</a>
+      <a href="presentation.html">عرض تقديمي</a>
+      <a href="contact.html">اتصل بنا</a>
+    </div>
+  </div>
+</nav>
+
+<div class="page-header" id="main">
+  <div class="container">
+    <h1 id="nd-title">خبر</h1>
+    <p id="nd-date"></p>
+  </div>
+</div>
+
+<section class="section">
+  <div class="container" style="max-width:860px;">
+    <div id="nd-image" style="margin-bottom:24px;"></div>
+    <div id="nd-body" style="font-size:17px;line-height:1.9;color:var(--ink);"></div>
+    <div id="nd-video" style="margin-top:20px;"></div>
+    <div style="margin-top:30px;">
+      <a href="news.html" class="btn btn-dark">← العودة للأخبار</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <h4>مدرسة الالفي الثانوية المشتركة</h4>
+        <p>بيت للعلم والتميز — نربّي قادة الغد بقيم أصيلة وتعليم عصري.</p>
+      </div>
+      <div>
+        <h4>روابط سريعة</h4>
+        <ul class="footer-links">
+          <li><a href="about.html">من نحن</a></li>
+          <li><a href="programs.html">البرامج</a></li>
+          <li><a href="news.html">الأخبار</a></li>
+          <li><a href="gallery.html">المعرض</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>الموارد</h4>
+        <ul class="footer-links">
+          <li><a href="#">الجدول المدرسي</a></li>
+          <li><a href="#">المناهج</a></li>
+          <li><a href="#">المكتبة</a></li>
+          <li><a href="#">التوظيف</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>تواصل معنا</h4>
+        <ul class="footer-links">
+          <li><img src="images/icons/phone.svg" class="ico-line" alt=""> 011-234-5678</li>
+          <li><img src="images/icons/mail.svg" class="ico-line" alt=""> info@alalfi-school.edu.eg</li>
+          <li><img src="images/icons/pin.svg" class="ico-line" alt=""> منيا القمح، جمهورية مصر العربية</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">© 2026 مدرسة الالفي الثانوية المشتركة. جميع الحقوق محفوظة.</div>
+  </div>
+</footer>
+
+<script src="js/content.js"></script>
+<script src="js/main.js"></script>
+<script>
+(function () {
+  function esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  const params = new URLSearchParams(location.search);
+  const id = parseInt(params.get('id') || '0', 10);
+  let news = [];
+  try {
+    const d = JSON.parse(localStorage.getItem('alalfi_admin_v1'));
+    if (d && Array.isArray(d.news)) news = d.news;
+  } catch (e) {}
+  // fallback: try to find in a global default? none
+  const item = news.find(n => n.id === id);
+  const titleEl = document.getElementById('nd-title');
+  const dateEl = document.getElementById('nd-date');
+  const imgEl = document.getElementById('nd-image');
+  const bodyEl = document.getElementById('nd-body');
+  const vidEl = document.getElementById('nd-video');
+  if (!item) {
+    titleEl.textContent = 'الخبر غير موجود';
+    bodyEl.innerHTML = '<p>لم يتم العثور على هذا الخبر. <a href="news.html">العودة للأخبار</a></p>';
+    return;
+  }
+  titleEl.textContent = item.title;
+  dateEl.textContent = item.date || '';
+  document.title = item.title + ' — مدرسة الالفي';
+  if (item.img) {
+    imgEl.innerHTML = `<img src="${esc(item.img)}" alt="${esc(item.title)}" style="width:100%;border-radius:8px;box-shadow:0 12px 30px -12px rgba(0,0,0,0.3);">`;
+  }
+  const body = item.body || item.excerpt || '';
+  bodyEl.innerHTML = esc(body).replace(/\n/g, '<br>');
+  if (item.video) {
+    vidEl.innerHTML = `<a href="${esc(item.video)}" target="_blank" class="btn btn-dark">▶ مشاهدة الفيديو</a>`;
+  }
+})();
+</script>
+</body>
+</html>

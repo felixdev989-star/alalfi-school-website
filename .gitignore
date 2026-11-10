@@ -1,0 +1,28 @@
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# ---- Node / tooling ----
+node_modules/
+npm-debug.log*
+.npm/
+
+# ---- Cloudflare / Wrangler ----
+.wrangler/
+.dev.vars
+dist/
+
+# ---- Admin data (local only) ----
+*.local.json
+_admin_backup.json
+
+# ---- Temp / scratch ----
+_temp/
+tmp/
+*.tmp
+*.log
+_*.html
