@@ -195,15 +195,50 @@ const sections = [
   { id: 'users', label: 'المستخدمون', icon: '🔐', superadmin: true },
 ];
 
+/* Permission levels: none | view | edit | full */
+const PERM_LEVELS = [
+  { v: 'none', label: 'مفيش' },
+  { v: 'view', label: 'قراءة' },
+  { v: 'edit', label: 'تعديل' },
+  { v: 'full', label: 'كامل' },
+];
+
+const DEFAULT_PERMS = {
+  dashboard: 'view', news: 'edit', events: 'edit', programs: 'edit',
+  gallery: 'edit', staff: 'edit', leaders: 'edit', about: 'edit',
+  settings: 'none', media: 'edit', account: 'full', users: 'none',
+};
+
+function defaultPerms() {
+  return Object.assign({}, DEFAULT_PERMS);
+}
+function permLevel(secId) {
+  if (!session) return 'none';
+  if (session.role === 'superadmin') return 'full';
+  const u = data.users.find(x => x.id === session.id);
+  const p = (u && u.perms) ? u.perms : DEFAULT_PERMS;
+  return p[secId] || 'none';
+}
+function permRank(v) { return { none: 0, view: 1, edit: 2, full: 3 }[v] || 0; }
+function canView(secId) { return permRank(permLevel(secId)) >= 1; }
+function canEdit(secId) { return permRank(permLevel(secId)) >= 2; }
+function canFull(secId) { return permRank(permLevel(secId)) >= 3; }
+
 let currentSection = 'dashboard';
 
 function visibleSections() {
-  return sections.filter(s => !s.superadmin || (session && session.role === 'superadmin'));
+  return sections.filter(s => {
+    if (s.id === 'account') return true;
+    if (s.superadmin) return session && session.role === 'superadmin';
+    return canView(s.id);
+  });
 }
 function canAccess(id) {
   const sec = sections.find(s => s.id === id);
   if (!sec) return false;
-  return !sec.superadmin || (session && session.role === 'superadmin');
+  if (sec.id === 'account') return true;
+  if (sec.superadmin) return session && session.role === 'superadmin';
+  return canView(id);
 }
 
 function renderApp() {
@@ -221,7 +256,7 @@ function renderApp() {
         <div class="foot">
           <div class="user-chip">
             <div class="av">${(session.name||session.username).charAt(0)}</div>
-            <div><div class="nm">${session.name||session.username}</div><div class="rl">${session.role}</div></div>
+            <div><div class="nm">${session.name||session.username}</div><div class="rl">${session.role==='superadmin'?'مدير عام (صلاحيات كاملة)':'محرر'}</div></div>
           </div>
           <button class="btn btn-outline-ad" onclick="exportData()">تصدير JSON</button>
           <button class="btn btn-outline-ad" onclick="document.getElementById('importFile').click()">استيراد JSON</button>
@@ -289,6 +324,36 @@ function renderSection(id) {
     users: renderUsers,
   };
   renders[id](c);
+  applyPerms(id, c);
+}
+
+/* Hide actions the current user is not allowed to perform */
+function applyPerms(id, c) {
+  if (!c) return;
+  const lvl = permLevel(id);
+  if (lvl === 'full') return;
+
+  const hide = (sel) => c.querySelectorAll(sel).forEach(el => {
+    el.style.display = 'none';
+    el.setAttribute('data-perm-hidden', '1');
+  });
+
+  if (permRank(lvl) < 3) {
+    // destructive / admin-only actions
+    hide('[onclick*="delete"],[onclick*="Delete"],[onclick*="removeUser"],[onclick*="resetData"],[onclick*="importData"]');
+  }
+  if (permRank(lvl) < 2) {
+    // any create/edit action
+    hide('[onclick*="add"],[onclick*="Add"],[onclick*="edit"],[onclick*="Edit"],[onclick*="save"],[onclick*="Save"],[onclick*="openCropper"],[onclick*="openModal"],[onclick*="openQuickAdd"],[onclick*="upload"],[onclick*="toggleCrop"]');
+    hide('button.btn-gold, button.btn-danger');
+  }
+  if (lvl === 'view') {
+    // read-only banner
+    const bar = document.createElement('div');
+    bar.className = 'perm-banner';
+    bar.textContent = 'وضع القراءة فقط — التعديل غير مسموح في هذا القسم';
+    c.insertBefore(bar, c.firstChild);
+  }
 }
 
 /* ===== Dashboard ===== */
@@ -990,6 +1055,18 @@ function deleteMedia(i) {
 }
 
 /* ===== Users ===== */
+function permSummary(perms) {
+  if (!perms) return 'الافتراضي';
+  const order = { full: 3, edit: 2, view: 1, none: 0 };
+  const parts = [];
+  sections.forEach(s => {
+    if (s.id === 'account' || s.id === 'users') return;
+    const lvl = perms[s.id] || 'none';
+    if (lvl === 'none') return;
+    parts.push(s.label + ': ' + ({ view: 'قراءة', edit: 'تعديل', full: 'كامل' }[lvl] || lvl));
+  });
+  return parts.length ? parts.join(' • ') : 'مفيش صلاحيات';
+}
 function renderUsers(c) {
   c.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -1002,7 +1079,10 @@ function renderUsers(c) {
         <tbody>${data.users.map(u => {
           const link = userLoginUrl(u.username);
           return `<tr>
-          <td><code style="font-size:12px;color:var(--ad-gold);">${esc(u.username)}</code></td><td>${esc(u.name)}</td><td><span class="badge ${u.role==='superadmin'?'badge-gold':'badge-green'}">${esc(u.role)}</span></td>
+          <td><code style="font-size:12px;color:var(--ad-gold);">${esc(u.username)}</code></td><td>${esc(u.name)}</td><td>
+            <span class="badge ${u.role==='superadmin'?'badge-gold':'badge-green'}">${u.role==='superadmin'?'مدير عام':'محرر'}</span>
+            ${u.role !== 'superadmin' ? `<div style="font-size:10px;color:var(--ad-muted);margin-top:4px;line-height:1.5;">${permSummary(u.perms)}</div>` : ''}
+          </td>
           <td>
             <div style="display:flex;gap:6px;align-items:center;min-width:260px;">
               <input readonly value="${esc(link)}" id="ulink_${u.id}" style="flex:1;padding:5px 8px;font-size:11px;border-radius:6px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);">
@@ -1020,6 +1100,21 @@ function renderUsers(c) {
     </div>`;
 }
 function userForm(u) {
+  const isSuper = u && u.role === 'superadmin';
+  const perms = (u && u.perms) ? u.perms : defaultPerms();
+  const permRows = sections.filter(s => s.id !== 'account' && s.id !== 'users').map(s => {
+    const cur = perms[s.id] || 'none';
+    const opts = PERM_LEVELS.map(pl => `
+      <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;white-space:nowrap;">
+        <input type="radio" name="perm_${s.id}" value="${pl.v}" ${cur === pl.v ? 'checked' : ''} style="width:auto;margin:0;">
+        ${pl.label}
+      </label>`).join('');
+    return `<tr>
+      <td style="font-weight:700;font-size:12px;white-space:nowrap;">${s.icon} ${s.label}</td>
+      <td><div style="display:flex;gap:12px;flex-wrap:wrap;">${opts}</div></td>
+    </tr>`;
+  }).join('');
+
   return `
     <h3>${u ? 'تعديل مستخدم' : 'مستخدم جديد'}</h3>
     <div class="form-grid">
@@ -1030,6 +1125,25 @@ function userForm(u) {
         <select id="f_role"><option value="admin" ${u?.role!=='superadmin'?'selected':''}>admin</option><option value="superadmin" ${u?.role==='superadmin'?'selected':''}>superadmin</option></select>
       </div>
     </div>
+
+    <div style="margin-top:22px;">
+      <h4 style="font-family:var(--ad-font-head);font-size:16px;margin-bottom:4px;">صلاحيات هذا المستخدم</h4>
+      <p style="color:var(--ad-muted);font-size:12px;margin-bottom:14px;">
+        <strong>مفيش</strong> = القسم مخفي تماماً &nbsp;|&nbsp;
+        <strong>قراءة</strong> = يشوف بس &nbsp;|&nbsp;
+        <strong>تعديل</strong> = يضيف ويعدّل &nbsp;|&nbsp;
+        <strong>كامل</strong> = يضيف ويعدّل ويحذف
+      </p>
+      ${isSuper ? `
+        <div class="perm-banner" style="margin-bottom:14px;">
+          هذا حساب superadmin — صلاحياته كاملة تلقائياً على كل الأقسام ومينفعش تتقلّص.
+        </div>` : `
+        <div class="table-wrap" style="max-height:320px;overflow:auto;">
+          <table><thead><tr><th style="width:170px;">القسم</th><th>المستوى</th></tr></thead>
+          <tbody>${permRows}</tbody></table>
+        </div>`}
+    </div>
+
     <div class="footer">
       <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
       <button class="btn btn-gold" onclick="saveUser(${u?.id||0})">حفظ</button>
@@ -1040,13 +1154,40 @@ function editUser(id) { openModal(userForm(data.users.find(u=>u.id===id))); }
 function saveUser(id) {
   const username = document.getElementById('f_username').value.trim();
   if (!username) { toast('اسم المستخدم مطلوب', true); return; }
-  const obj = { username, name: document.getElementById('f_name').value.trim(), password: document.getElementById('f_password').value, role: document.getElementById('f_role').value };
-  if (id) { const i = data.users.findIndex(u=>u.id===id); data.users[i] = { ...data.users[i], ...obj }; }
-  else { obj.id = uid(data.users); data.users.push(obj); }
+  const role = document.getElementById('f_role').value;
+
+  // collect permissions
+  const perms = {};
+  if (role !== 'superadmin') {
+    sections.forEach(sec => {
+      if (sec.id === 'account' || sec.id === 'users') return;
+      const checked = document.querySelector('input[name="perm_' + sec.id + '"]:checked');
+      perms[sec.id] = checked ? checked.value : 'none';
+    });
+    perms.account = 'full';
+    perms.users = 'none';
+  }
+
+  const obj = { username, name: document.getElementById('f_name').value.trim(), password: document.getElementById('f_password').value, role, perms };
+
+  if (id) {
+    const i = data.users.findIndex(u=>u.id===id);
+    if (i === -1) return;
+    const target = data.users[i];
+    if (target.role === 'superadmin' && role !== 'superadmin' && !confirm('أنت بتقلّل صلاحيات المدير العام. متأكد؟')) return;
+    data.users[i] = { ...target, ...obj };
+  } else {
+    obj.id = uid(data.users);
+    data.users.push(obj);
+  }
   if (!saveData(data)) return; closeModal(); renderSection('users'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
 }
 function deleteUser(id) {
-  if (!confirm('حذف هذا المستخدم؟')) return;
+  const target = data.users.find(u=>u.id===id);
+  if (!target) return;
+  if (target.role === 'superadmin') { toast('لا يمكن حذف حساب المدير العام (superadmin)', true); return; }
+  if (target.id === session.id) { toast('لا يمكنك حذف حسابك الحالي', true); return; }
+  if (!confirm('حذف المستخدم "' + (target.name || target.username) + '"؟')) return;
   data.users = data.users.filter(u=>u.id!==id);
   if (!saveData(data)) return; renderSection('users'); toast('تم الحذف — أعد تحميل صفحة الموقع');
 }
