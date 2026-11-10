@@ -18,7 +18,7 @@ SKIP_EXT = {".log", ".tmp", ".zip"}
 MAX_FILE_BYTES = 25 * 1024 * 1024
 
 
-def api(method, path, token, body=None, content_type=None, raw=False):
+def api(method, path, token, body=None, content_type=None, raw=False, soft=False):
     url = API + path
     data = None
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -31,6 +31,11 @@ def api(method, path, token, body=None, content_type=None, raw=False):
             return json.loads(payload) if payload else {}
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")
+        if soft:
+            try:
+                return json.loads(detail)
+            except Exception:
+                return {"success": False, "errors": [{"message": detail[:200]}]}
         print(f"HTTP {e.code} {method} {path}\n{detail[:800]}")
         sys.exit(1)
 
@@ -80,13 +85,13 @@ def main():
 
     # 1. ensure project exists
     print(f"==> checking project '{project}'")
-    r = api("GET", f"/accounts/{account_id}/pages/projects/{project}", token)
+    r = api("GET", f"/accounts/{account_id}/pages/projects/{project}", token, soft=True)
     if not r.get("success"):
         print("    creating project...")
         r = api("POST", f"/accounts/{account_id}/pages/projects", token,
                 {"name": project, "production_branch": "main"})
         if not r.get("success"):
-            print("FAILED to create project:", json.dumps(r)[:400])
+            print("FAILED to create project:", json.dumps(r)[:600])
             sys.exit(1)
     print("    OK project ready")
 
@@ -140,12 +145,9 @@ def main():
     print("\n=== DEPLOYED ===")
     print("URL:", d.get("url"))
     print("Deployment:", d.get("id"))
-    for alias in (d.get("deployment_trigger") or {},).items():
-        pass
-    aliases = d.get("aliases") or []
-    for a in aliases:
+    for a in (d.get("aliases") or []):
         print("Alias:", a)
-    print("\nOpen:", d.get("url"))
+    print("\nProduction URL: https://" + project + ".pages.dev")
 
 
 if __name__ == "__main__":
