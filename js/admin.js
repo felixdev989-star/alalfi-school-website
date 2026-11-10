@@ -111,7 +111,13 @@ let session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
 function uid(arr) { return (arr.reduce((m, x) => Math.max(m, x.id || 0), 0) || 0) + 1; }
 function readFileAsDataURL(file) { return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = e => resolve(e.target.result); r.onerror = reject; r.readAsDataURL(file); }); }
 function toast(msg, err) {
-  const t = document.getElementById('toast');
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
   t.textContent = msg;
   t.className = 'toast show' + (err ? ' error' : '');
   clearTimeout(toast._t);
@@ -119,19 +125,44 @@ function toast(msg, err) {
 }
 
 /* ===== Login ===== */
+function userLoginUrl(username) {
+  const base = location.origin + location.pathname;
+  return base + '?u=' + encodeURIComponent(username);
+}
+function copyText(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.select();
+  el.setSelectionRange(0, 99999);
+  let done = false;
+  try { done = document.execCommand('copy'); } catch (e) { done = false; }
+  if (!done && navigator.clipboard) {
+    navigator.clipboard.writeText(el.value).then(() => toast('تم نسخ الرابط')).catch(() => toast('انسخ الرابط يدوياً'));
+  } else {
+    toast(done ? 'تم نسخ الرابط' : 'انسخ الرابط يدوياً');
+  }
+}
 function renderLogin() {
+  const params = new URLSearchParams(location.search);
+  const pre = (params.get('u') || '').trim();
+  const known = pre ? data.users.find(x => (x.username || '').toLowerCase() === pre.toLowerCase()) : null;
+  let hint = '';
+  if (pre && known) hint = 'مرحباً ' + (known.name || known.username) + ' — أدخل كلمة المرور الخاصة بك';
+  else if (pre) hint = 'رابط الدخول غير معروف — تأكد من العنوان';
   document.getElementById('app').innerHTML = `
     <div class="login-screen">
       <div class="login-box">
         <img src="images/logo.svg" alt="" style="width:70px;height:70px;margin:0 auto 12px;display:block;">
         <h1>لوحة التحكم</h1>
         <p>مدرسة الالفي الثانوية المشتركة</p>
-        <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="admin"></div>
-        <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password" value="admin123"></div>
+        ${hint ? '<div class="login-hint">' + hint + '</div>' : ''}
+        <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="${esc(pre)}"${pre ? ' readonly' : ''}></div>
+        <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password"></div>
         <button class="btn btn-gold" style="width:100%;padding:12px;margin-top:8px;" onclick="doLogin()">تسجيل الدخول</button>
-        <p style="margin-top:14px;font-size:11px;color:#8fa0b8;">الافتراضي: admin / admin123</p>
+        ${pre ? '' : '<p style="margin-top:14px;font-size:11px;color:#8fa0b8;">الافتراضي: admin / admin123</p>'}
       </div>
     </div>`;
+  if (pre) setTimeout(() => { const lp = document.getElementById('lp'); if (lp) lp.focus(); }, 120);
 }
 function doLogin() {
   const u = document.getElementById('lu').value.trim();
@@ -160,10 +191,20 @@ const sections = [
   { id: 'about', label: 'من نحن', icon: 'ℹ️' },
   { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
   { id: 'media', label: 'مكتبة الوسائط', icon: '📁' },
-  { id: 'users', label: 'المستخدمون', icon: '🔐' },
+  { id: 'account', label: 'حسابي', icon: '🔑' },
+  { id: 'users', label: 'المستخدمون', icon: '🔐', superadmin: true },
 ];
 
 let currentSection = 'dashboard';
+
+function visibleSections() {
+  return sections.filter(s => !s.superadmin || (session && session.role === 'superadmin'));
+}
+function canAccess(id) {
+  const sec = sections.find(s => s.id === id);
+  if (!sec) return false;
+  return !sec.superadmin || (session && session.role === 'superadmin');
+}
 
 function renderApp() {
   if (!session) { renderLogin(); return; }
@@ -175,7 +216,7 @@ function renderApp() {
           <div><h1>لوحة التحكم</h1><small>${data.settings.siteName}</small></div>
         </div>
         <nav>
-          ${sections.map(s => `<a href="#" data-sec="${s.id}" class="${s.id===currentSection?'active':''}"><span class="ic">${s.icon}</span>${s.label}</a>`).join('')}
+          ${visibleSections().map(s => `<a href="#" data-sec="${s.id}" class="${s.id===currentSection?'active':''}"><span class="ic">${s.icon}</span>${s.label}</a>`).join('')}
         </nav>
         <div class="foot">
           <div class="user-chip">
@@ -221,6 +262,7 @@ function renderApp() {
 }
 
 function switchSection(id) {
+  if (!canAccess(id)) { toast('ليس لديك صلاحية لهذا القسم', true); return; }
   currentSection = id;
   document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.sec === id));
   const sec = sections.find(s=>s.id===id);
@@ -243,6 +285,7 @@ function renderSection(id) {
     about: renderAbout,
     settings: renderSettings,
     media: renderMedia,
+    account: renderAccount,
     users: renderUsers,
   };
   renders[id](c);
@@ -955,14 +998,24 @@ function renderUsers(c) {
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>اسم المستخدم</th><th>الاسم</th><th>الدور</th><th>الإجراءات</th></tr></thead>
-        <tbody>${data.users.map(u => `<tr>
-          <td>${u.username}</td><td>${u.name}</td><td><span class="badge ${u.role==='superadmin'?'badge-gold':'badge-green'}">${u.role}</span></td>
+        <thead><tr><th>اسم المستخدم</th><th>الاسم</th><th>الدور</th><th>رابط الدخول الخاص</th><th>الإجراءات</th></tr></thead>
+        <tbody>${data.users.map(u => {
+          const link = userLoginUrl(u.username);
+          return `<tr>
+          <td><code style="font-size:12px;color:var(--ad-gold);">${esc(u.username)}</code></td><td>${esc(u.name)}</td><td><span class="badge ${u.role==='superadmin'?'badge-gold':'badge-green'}">${esc(u.role)}</span></td>
+          <td>
+            <div style="display:flex;gap:6px;align-items:center;min-width:260px;">
+              <input readonly value="${esc(link)}" id="ulink_${u.id}" style="flex:1;padding:5px 8px;font-size:11px;border-radius:6px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);">
+              <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;white-space:nowrap;" onclick="copyText('ulink_${u.id}')">نسخ</button>
+              <a class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;white-space:nowrap;" href="${esc(link)}" target="_blank">فتح</a>
+            </div>
+          </td>
           <td>
             <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;" onclick="editUser(${u.id})">تعديل</button>
             ${u.id !== session.id ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:11px;" onclick="deleteUser(${u.id})">حذف</button>` : ''}
           </td>
-        </tr>`).join('')}</tbody>
+        </tr>`;
+        }).join('')}</tbody>
       </table>
     </div>`;
 }
@@ -996,6 +1049,58 @@ function deleteUser(id) {
   if (!confirm('حذف هذا المستخدم؟')) return;
   data.users = data.users.filter(u=>u.id!==id);
   if (!saveData(data)) return; renderSection('users'); toast('تم الحذف — أعد تحميل صفحة الموقع');
+}
+
+/* ===== My account (per-user login link + password) ===== */
+function renderAccount(c) {
+  const u = data.users.find(x => x.id === session.id) || session;
+  const link = userLoginUrl(u.username);
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <h3 style="font-family:var(--ad-font-head);margin-bottom:14px;">بيانات حسابي</h3>
+      <div class="form-grid">
+        <div class="form-group"><label>اسم المستخدم</label><input value="${esc(u.username)}" readonly></div>
+        <div class="form-group"><label>الاسم</label><input value="${esc(u.name || '')}" readonly></div>
+        <div class="form-group"><label>الدور</label><input value="${esc(u.role)}" readonly></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+      <h3 style="font-family:var(--ad-font-head);margin-bottom:10px;">رابط الدخول الخاص ب��</h3>
+      <p style="color:var(--ad-muted);font-size:13px;margin-bottom:12px;">هذا الرابط مخصص لحسابك فقط. افتحه في أي جهاز وسجّل الدخول باسمك وكلمة مرورك — لا تحتاج لكتابة اسم المستخدم.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="myLink" readonly value="${esc(link)}" style="flex:1;min-width:250px;padding:10px 12px;border-radius:8px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);font-size:12px;">
+        <button class="btn btn-gold" onclick="copyText('myLink')">نسخ الرابط</button>
+        <a class="btn btn-outline-ad" href="${esc(link)}" target="_blank">فتح الرابط</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-family:var(--ad-font-head);margin-bottom:14px;">تغيير كلمة المرور</h3>
+      <div class="form-grid">
+        <div class="form-group"><label>كلمة المرور الحالية</label><input id="cp_old" type="password"></div>
+        <div class="form-group"><label>كلمة المرور الجديدة</label><input id="cp_new" type="password"></div>
+        <div class="form-group"><label>تأكيد كلمة المرور</label><input id="cp_new2" type="password"></div>
+      </div>
+      <div style="margin-top:16px;text-align:left;">
+        <button class="btn btn-gold" onclick="changeMyPassword()">تحديث كلمة المرور</button>
+      </div>
+    </div>`;
+}
+function changeMyPassword() {
+  const oldP = document.getElementById('cp_old').value;
+  const n1 = document.getElementById('cp_new').value;
+  const n2 = document.getElementById('cp_new2').value;
+  if (!n1) { toast('كلمة المرور الجديدة مطلوبة', true); return; }
+  if (n1 !== n2) { toast('كلمتا المرور غير متطابقتين', true); return; }
+  if (n1.length < 6) { toast('كلمة المرور لازم تكون 6 حروف على الأقل', true); return; }
+  const u = data.users.find(x => x.id === session.id);
+  if (!u) { toast('الحساب غير موجود', true); return; }
+  if (u.password !== oldP) { toast('كلمة المرور الحالية غير صحيحة', true); return; }
+  u.password = n1;
+  if (!saveData(data)) return;
+  toast('تم تحديث كلمة المرور بنجاح');
+  renderSection('account');
 }
 
 /* ===== Modal helpers ===== */

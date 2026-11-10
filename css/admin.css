@@ -222,6 +222,19 @@ tbody tr:last-child td { border-bottom: none; }
 .login-box p { text-align: center; color: var(--ad-muted); font-size: 13px; margin-bottom: 28px; }
 .login-box .form-group { margin-bottom: 16px; }
 .login-box .btn { width: 100%; padding: 13px; font-size: 15px; border-radius: 8px; }
+.login-hint {
+  background: rgba(201,162,39,0.12);
+  border: 1px solid rgba(201,162,39,0.45);
+  color: #f0d68a;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 18px;
+  line-height: 1.6;
+}
+.login-box input[readonly] { opacity: 0.85; cursor: not-allowed; }
 
 /* Buttons */
 .btn {
