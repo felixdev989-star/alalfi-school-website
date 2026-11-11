@@ -64,27 +64,54 @@ export async function onRequestPost(context) {
       return json({ ok: false, error: 'invalid credentials' }, 401, request);
     }
 
-    // ---- device check: the account may be bound to specific devices ----
+    // ---- device check: every account is bound to approved devices only ----
     const deviceId = String(payload.deviceId || '').trim();
     const deviceInfo = String(payload.deviceInfo || '').trim();
-    if (deviceId && user.role !== 'superadmin') {
+    const recoveryKey = String(payload.recoveryKey || '').trim();
+    const isRecovery = !!(env.EDIT_TOKEN && recoveryKey && recoveryKey === env.EDIT_TOKEN);
+
+    if (deviceId) {
       const bound = await env.ALALFI_DB.prepare(
         "SELECT id, status FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1"
       ).bind(user.id, deviceId).first();
-      if (bound && bound.status !== 'active') {
-        return json({ ok: false, error: 'device_pending' }, 403, request);
+
+      if (bound && bound.status !== 'active' && !isRecovery) {
+        return json({
+          ok: false,
+          error: 'device_pending',
+          recoveryAllowed: !!env.EDIT_TOKEN,
+        }, 403, request);
       }
       if (!bound) {
-        // first device of this account binds automatically
+        if (!isRecovery) {
+          // unknown device -> needs approval first
+          await env.ALALFI_DB.prepare(
+            `INSERT INTO user_devices (user_id, device_id, device_info, status)
+             VALUES (?, ?, ?, 'pending')
+             ON CONFLICT(user_id, device_id) DO UPDATE SET device_info = excluded.device_info`
+          ).bind(user.id, deviceId, deviceInfo).run();
+          return json({
+            ok: false,
+            error: 'device_pending',
+            recoveryAllowed: !!env.EDIT_TOKEN,
+          }, 403, request);
+        }
+        // recovery key -> bind this device right away
         await env.ALALFI_DB.prepare(
           `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
            VALUES (?, ?, ?, 'active', datetime('now'))
-           ON CONFLICT(user_id, device_id) DO UPDATE SET device_info = excluded.device_info, last_seen = datetime('now')`
+           ON CONFLICT(user_id, device_id) DO UPDATE SET status='active', device_info=excluded.device_info, last_seen=datetime('now')`
         ).bind(user.id, deviceId, deviceInfo).run();
       } else {
-        await env.ALALFI_DB.prepare(
-          "UPDATE user_devices SET device_info = ?, last_seen = datetime('now') WHERE id = ?"
-        ).bind(deviceInfo, bound.id).run();
+        if (isRecovery && bound.status !== 'active') {
+          await env.ALALFI_DB.prepare(
+            "UPDATE user_devices SET status='active', last_seen = datetime('now') WHERE id = ?"
+          ).bind(bound.id).run();
+        } else {
+          await env.ALALFI_DB.prepare(
+            "UPDATE user_devices SET device_info = ?, last_seen = datetime('now') WHERE id = ?"
+          ).bind(deviceInfo, bound.id).run();
+        }
       }
     }
 

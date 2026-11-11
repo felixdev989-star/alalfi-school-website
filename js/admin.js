@@ -211,6 +211,7 @@ function renderLogin() {
         ${hint ? '<div class="login-hint">' + hint + '</div>' : ''}
         <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="${esc(pre)}"${pre ? ' readonly' : ''}></div>
         <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password" autocomplete="current-password"></div>
+        <div class="form-group" id="recoveryBox" style="display:none;"><label>رمز الاسترداد (للجهاز الجديد)</label><input id="lk" type="password" placeholder="رمز الاسترداد" autocomplete="off"></div>
         <button class="btn btn-gold" style="width:100%;padding:12px;margin-top:8px;" onclick="doLogin()">تسجيل الدخول</button>
         ${pre ? '' : '<p style="margin-top:14px;font-size:11px;color:#8fa0b8;">الدخول يتم التحقق منه على الخادم - الحسابات يديرها المدير العام فقط</p>'}
       </div>
@@ -264,6 +265,14 @@ function registerDevice(slug) {
       const form = document.querySelector('.login-box');
       if (form) {
         form.querySelectorAll('.form-group, .btn-gold, p').forEach(el => { el.style.display = 'none'; });
+      }
+      const recBox = document.getElementById('recoveryBox');
+      if (recBox) {
+        recBox.style.display = 'block';
+        const lbl = recBox.querySelector('label');
+        if (lbl) lbl.textContent = 'رمز الاسترداد (لو انت المدير العام)';
+        const inp = document.getElementById('lk');
+        if (inp) inp.setAttribute('placeholder', 'رمز الاسترداد');
       }
       banner.style.display = 'block';
       banner.style.background = 'rgba(201,162,39,0.14)';
@@ -351,12 +360,19 @@ function doLogin() {
       device: detectDevice(),
       deviceId: deviceId(),
       deviceInfo: deviceInfo(),
+      recoveryKey: (document.getElementById('lk') || {}).value || '',
     }),
   })
     .then(r => r.json())
     .then(res => {
       if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول'; }
       if (!res || !res.ok) {
+        if (res && res.error === 'device_pending') {
+          const box = document.getElementById('recoveryBox');
+          if (box) box.style.display = 'block';
+          toast('هذا الجهاز غير مفعّل - أدخل رمز الاسترداد أو اطلب موافقة المدير العام', true);
+          return;
+        }
         toast('اسم المستخدم أو كلمة المرور غير صحيحة', true);
         return;
       }
