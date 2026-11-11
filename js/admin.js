@@ -322,6 +322,7 @@ function renderApp() {
   document.getElementById('app').innerHTML = `
     <div class="admin-shell">
       <aside class="sidebar" id="sidebar">
+        <button class="sidebar-close" id="sidebarClose" onclick="closeSidebar()" aria-label="إغلاق القائمة">✕</button>
         <div class="brand">
           <img src="images/logo.svg" alt="">
           <div><h1>لوحة التحكم</h1><small>${data.settings.siteName}</small></div>
@@ -341,10 +342,11 @@ function renderApp() {
           <div style="text-align:center;font-size:10px;color:#8fa0b8;margin-top:4px;">v1.0</div>
         </div>
       </aside>
+      <button class="menu-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="فتح القائمة">☰</button>
+      <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
       <div class="main">
         <div class="topbar">
           <div class="left">
-            <button class="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
             <span class="logo-text">AlAlfi Admin</span>
             <button class="company-select">مدرسة الالفي ▾</button>
             <h2 id="pageTitle" style="font-family:var(--ad-font-head);font-size:20px;margin:0 12px;color:var(--ad-ink);">${sections.find(s=>s.id===currentSection).label}</h2>
@@ -367,9 +369,29 @@ function renderApp() {
     <div class="modal-backdrop" id="cropBackdrop"><div class="modal" id="cropModal" style="max-width:420px;"></div></div>
     <div class="toast" id="toast"></div>`;
   document.querySelectorAll('.sidebar nav a').forEach(a => {
-    a.addEventListener('click', e => { e.preventDefault(); switchSection(a.dataset.sec); });
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      switchSection(a.dataset.sec);
+      if (window.innerWidth <= 900) closeSidebar();
+    });
   });
   renderSection(currentSection);
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebarBackdrop');
+  if (!sb) return;
+  const open = sb.classList.toggle('open');
+  if (bd) bd.classList.toggle('show', open);
+  document.body.classList.toggle('sidebar-open', open);
+}
+function closeSidebar() {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebarBackdrop');
+  if (sb) sb.classList.remove('open');
+  if (bd) bd.classList.remove('show');
+  document.body.classList.remove('sidebar-open');
 }
 
 function switchSection(id) {
