@@ -1,6 +1,7 @@
 /* ===== Admin Panel Logic ===== */
 const STORAGE_KEY = 'alalfi_admin_v1';
 const SESSION_KEY = 'alalfi_admin_session';
+const EDIT_TOKEN_KEY = 'alalfi_edit_token';
 let charts = {};
 let cropper = { img: null, x: 0, y: 0, zoom: 1, dragging: false, lastX: 0, lastY: 0, targetField: null };
 function destroyCharts() {
@@ -95,14 +96,42 @@ function loadData() {
     return defaultData();
   }
 }
+/* Global sync: push the content to Cloudflare KV so EVERY visitor sees it */
+let _syncTimer = null;
+function syncGlobal(d, silent) {
+  try {
+    clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(() => {
+      const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
+      fetch('/api/data', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+        body: JSON.stringify({ data: d }),
+      })
+        .then(r => r.json())
+        .then(res => {
+          if (res && res.ok) {
+            if (!silent) toast('تم الحفظ والنشر للجميع');
+          } else {
+            toast('تم الحفظ محلياً — تعذّر النشر العام: ' + ((res && res.error) || 'خطأ'), true);
+          }
+        })
+        .catch(() => {
+          if (!silent) toast('تم الحفظ محلياً فقط (الموقع مش متصل بالسيرفر)', true);
+        });
+    }, 350);
+  } catch (e) { /* ignore */ }
+}
+
 function saveData(d) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
-    return true;
   } catch (e) {
     toast('فشل الحفظ: البيانات كبيرة جداً (quota). استخدم روابط بدلاً من رفع ملفات.', true);
     return false;
   }
+  syncGlobal(d, false);
+  return true;
 }
 
 let data = loadData();
@@ -1216,6 +1245,18 @@ function renderAccount(c) {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:18px;">
+      <h3 style="font-family:var(--ad-font-head);margin-bottom:10px;">مفتاح النشر العام (Publish Key)</h3>
+      <p style="color:var(--ad-muted);font-size:13px;margin-bottom:12px;">هذا المفتاح يسمح للوحة التحكم برفع التعديلات على السيرفر عشان تشوفها <strong>كل الزوار</strong> على كل الأجهزة. لو فاضي، التعديلات هتفضل محفوظة في هذا المتصفح بس.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="editToken" type="password" placeholder="ألصق المفتاح هنا" value="${esc(localStorage.getItem(EDIT_TOKEN_KEY) || '')}" style="flex:1;min-width:250px;padding:10px 12px;border-radius:8px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);font-size:12px;">
+        <button class="btn btn-gold" onclick="saveEditToken()">حفظ المفتاح</button>
+        <button class="btn btn-outline-ad" onclick="publishNow()">نشر الآن</button>
+        <button class="btn btn-danger" onclick="resetGlobal()">إعادة تعيين المحتوى العام</button>
+      </div>
+      <div id="publishStatus" style="margin-top:10px;font-size:12px;color:var(--ad-muted);"></div>
+    </div>
+
     <div class="card">
       <h3 style="font-family:var(--ad-font-head);margin-bottom:14px;">تغيير كلمة المرور</h3>
       <div class="form-grid">
@@ -1227,6 +1268,41 @@ function renderAccount(c) {
         <button class="btn btn-gold" onclick="changeMyPassword()">تحديث كلمة المرور</button>
       </div>
     </div>`;
+}
+function saveEditToken() {
+  const v = document.getElementById('editToken').value.trim();
+  if (v) localStorage.setItem(EDIT_TOKEN_KEY, v);
+  else localStorage.removeItem(EDIT_TOKEN_KEY);
+  toast(v ? 'تم حفظ مفتاح النشر' : 'تم مسح المفتاح');
+}
+function publishNow() {
+  const st = document.getElementById('publishStatus');
+  const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
+  if (!token) { toast('ألصق مفتاح النشر أولاً', true); return; }
+  if (st) st.textContent = 'جاري النشر...';
+  fetch('/api/data', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+    body: JSON.stringify({ data: data }),
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok) { if (st) st.textContent = 'تم النشر بنجاح — ' + (res.savedAt || ''); toast('تم النشر للجميع'); }
+      else { if (st) st.textContent = 'فشل: ' + ((res && res.error) || 'خطأ'); toast('فشل النشر: ' + ((res && res.error) || ''), true); }
+    })
+    .catch(e => { if (st) st.textContent = 'خطأ الاتصال'; toast('خطأ الاتصال بالسيرفر', true); });
+}
+function resetGlobal() {
+  const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
+  if (!token) { toast('ألصق مفتاح النشر أولاً', true); return; }
+  if (!confirm('هيتمسح المحتوى المنشور على السيرفر لكل الزوار وترجع الإعدادات الافتراضية. متأكد؟')) return;
+  fetch('/api/data', { method: 'DELETE', headers: { 'X-Edit-Token': token } })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok) { toast('تم إعادة تعيين المحتوى العام'); setTimeout(() => location.reload(), 900); }
+      else toast('فشل: ' + ((res && res.error) || ''), true);
+    })
+    .catch(() => toast('خطأ الاتصال', true));
 }
 function changeMyPassword() {
   const oldP = document.getElementById('cp_old').value;
@@ -1443,3 +1519,22 @@ function esc(v) { return (v == null ? '' : String(v)).replace(/&/g,'&amp;').repl
 
 /* ===== Boot ===== */
 if (session) renderApp(); else renderLogin();
+
+/* Pull the global content (Cloudflare KV) so the panel shows the
+   latest shared data on any device, not just this browser's cache. */
+function pullGlobal() {
+  if (location.protocol === 'file:') return;
+  fetch('/api/data', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(res => {
+      if (!res || !res.ok || !res.data) return;
+      const remote = JSON.stringify(res.data);
+      const local = localStorage.getItem(STORAGE_KEY);
+      if (remote === local) return;
+      try { localStorage.setItem(STORAGE_KEY, remote); } catch (e) { return; }
+      data = loadData();
+      if (session) { renderApp(); toast('تم تحديث البيانات من السيرفر'); }
+    })
+    .catch(() => {});
+}
+pullGlobal();
