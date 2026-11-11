@@ -79,7 +79,7 @@ img { max-width: 100%; }
 .sidebar .foot button { width: 100%; padding: 9px; border-radius: var(--ad-radius-sm); font-size: 12px; font-weight: 700; }
 
 /* Main */
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; max-width: 100%; overflow-x: hidden; }
 .topbar {
   background: var(--ad-sidebar); border-bottom: 1px solid var(--ad-line);
   padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -106,7 +106,8 @@ img { max-width: 100%; }
 .menu-toggle { display: none; }
 .topbar .breadcrumb { font-size: 11px; color: var(--ad-muted); }
 
-.content { padding: 24px; animation: fadeIn 0.35s ease; }
+.content { padding: 24px; animation: fadeIn 0.35s ease; max-width: 100%; min-width: 0; }
+.content > * { max-width: 100%; }
 
 /* Cards */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
@@ -141,8 +142,27 @@ img { max-width: 100%; }
 /* Tables */
 .table-wrap {
   background: var(--ad-card); border: 1px solid var(--ad-line); border-radius: var(--ad-radius);
-  overflow: hidden; box-shadow: var(--ad-shadow-sm);
+  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+  max-width: 100%; box-shadow: var(--ad-shadow-sm);
 }
+.table-wrap table { min-width: 100%; }
+.table-wrap::-webkit-scrollbar { height: 8px; }
+.table-wrap::-webkit-scrollbar-track { background: var(--ad-sidebar); }
+.table-wrap::-webkit-scrollbar-thumb { background: rgba(201,162,39,0.45); border-radius: 4px; }
+.table-wrap::-webkit-scrollbar-thumb:hover { background: var(--ad-gold); }
+
+/* users table - login link cell */
+.ulink-row { display: flex; gap: 6px; align-items: center; min-width: 250px; }
+.ulink-input {
+  flex: 1; min-width: 120px; padding: 5px 8px; font-size: 11px;
+  border-radius: 6px; border: 1px solid var(--ad-line);
+  background: var(--ad-card); color: var(--ad-ink);
+}
+.ulink-btn { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+
+/* responsive 2-column grid (dashboard charts) */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid-2.full { margin-bottom: 18px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { padding: 13px 16px; text-align: right; border-bottom: 1px solid var(--ad-line); }
 th { background: var(--ad-card-2); font-weight: 700; color: var(--ad-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
@@ -345,7 +365,6 @@ body.sidebar-open { overflow: hidden; }
     color: var(--ad-ink); font-size: 20px; cursor: pointer;
   }
   .menu-toggle:hover { background: var(--ad-gold); color: var(--ad-sidebar); }
-  .topbar .left { padding-inline-start: 52px; }
   /* modals must be usable on small screens */
   .modal-backdrop { padding: 12px; align-items: flex-start; }
   .modal { max-height: 92vh; padding: 20px 16px; border-radius: 14px; }
@@ -355,6 +374,31 @@ body.sidebar-open { overflow: hidden; }
   .topbar .search-box input { width: 150px; }
   .content { padding: 16px; }
   .cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .grid-2 { grid-template-columns: 1fr; gap: 14px; }
+  .table-wrap table { font-size: 12px; }
+  .table-wrap th, .table-wrap td { padding: 10px 8px; white-space: nowrap; }
+  .table-wrap td input[readonly] { max-width: 150px; }
+  .chart-card { padding: 14px; }
+  .chart-wrap { height: 220px; }
+  /* narrow the login-link column so the table stays usable */
+  .ulink-row { min-width: 0; gap: 4px; }
+  .ulink-input { min-width: 90px; font-size: 10px; padding: 4px 6px; }
+  .ulink-btn { padding: 4px 6px; font-size: 10px; }
+
+  /* ---- topbar: keep it clean on small screens ---- */
+  .topbar { padding: 10px 12px 10px 58px; gap: 8px; }
+  .topbar .right { gap: 6px; }
+  .topbar .search-box { display: none; }
+  .topbar .logo-text { display: none; }
+  .topbar .company-select { font-size: 11px; padding: 5px 9px; white-space: nowrap; }
+  .topbar h2#pageTitle {
+    font-size: 15px !important; margin: 0 4px !important;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw;
+  }
+  .topbar .icon-btn { width: 32px; height: 32px; font-size: 13px; }
+  .topbar .user-chip { padding: 3px !important; }
+  .topbar .user-chip span { display: none; }
+  .topbar .btn-gold { padding: 7px 10px !important; font-size: 12px !important; }
 }
 .menu-toggle { background: none; font-size: 22px; color: var(--ad-ink); }
 

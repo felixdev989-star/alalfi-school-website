@@ -470,7 +470,7 @@ function renderDashboard(c) {
       <div class="chart-wrap"><canvas id="chartArea"></canvas></div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;">
+    <div class="grid-2 full">
       <div class="chart-card">
         <h3>Allocation by Currency</h3>
         <div class="chart-wrap"><canvas id="chartDonut1"></canvas></div>
@@ -481,7 +481,7 @@ function renderDashboard(c) {
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+    <div class="grid-2">
       <div class="chart-card">
         <h3>Profit by Bot</h3>
         <div class="chart-wrap"><canvas id="chartBar1"></canvas></div>
@@ -1186,11 +1186,11 @@ function renderUsers(c) {
             ${esc(u.lastDevice || '—')}<br>
             <span style="font-size:10px;">${u.lastLogin ? esc(new Date(u.lastLogin).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })) : 'لم يسجل دخول بعد'}</span>
           </td>
-          <td>
-            <div style="display:flex;gap:6px;align-items:center;min-width:260px;">
-              <input readonly value="${esc(link)}" id="ulink_${u.id}" style="flex:1;padding:5px 8px;font-size:11px;border-radius:6px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);">
-              <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;white-space:nowrap;" onclick="copyText('ulink_${u.id}')">نسخ</button>
-              <a class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;white-space:nowrap;" href="${esc(link)}" target="_blank">فتح</a>
+          <td class="ulink-cell">
+            <div class="ulink-row">
+              <input readonly value="${esc(link)}" id="ulink_${u.id}" class="ulink-input">
+              <button class="btn btn-outline-ad ulink-btn" onclick="copyText('ulink_${u.id}')">نسخ</button>
+              <a class="btn btn-outline-ad ulink-btn" href="${esc(link)}" target="_blank">فتح</a>
             </div>
           </td>
           <td>
