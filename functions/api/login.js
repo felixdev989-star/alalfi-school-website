@@ -64,6 +64,30 @@ export async function onRequestPost(context) {
       return json({ ok: false, error: 'invalid credentials' }, 401, request);
     }
 
+    // ---- device check: the account may be bound to specific devices ----
+    const deviceId = String(payload.deviceId || '').trim();
+    const deviceInfo = String(payload.deviceInfo || '').trim();
+    if (deviceId && user.role !== 'superadmin') {
+      const bound = await env.ALALFI_DB.prepare(
+        "SELECT id, status FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1"
+      ).bind(user.id, deviceId).first();
+      if (bound && bound.status !== 'active') {
+        return json({ ok: false, error: 'device_pending' }, 403, request);
+      }
+      if (!bound) {
+        // first device of this account binds automatically
+        await env.ALALFI_DB.prepare(
+          `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
+           VALUES (?, ?, ?, 'active', datetime('now'))
+           ON CONFLICT(user_id, device_id) DO UPDATE SET device_info = excluded.device_info, last_seen = datetime('now')`
+        ).bind(user.id, deviceId, deviceInfo).run();
+      } else {
+        await env.ALALFI_DB.prepare(
+          "UPDATE user_devices SET device_info = ?, last_seen = datetime('now') WHERE id = ?"
+        ).bind(deviceInfo, bound.id).run();
+      }
+    }
+
     // create a server-side session
     const token = randomToken(32);
     const expiry = new Date(Date.now() + SESSION_HOURS * 3600 * 1000).toISOString()

@@ -358,11 +358,10 @@ body.sidebar-open { overflow: hidden; }
   .sidebar .brand { padding-left: 46px; }
   .topbar { z-index: 60; }
   .menu-toggle {
-    display: grid; place-items: center;
-    position: fixed; left: 12px; top: 12px; z-index: 130;
-    width: 42px; height: 42px; border-radius: 10px;
+    display: grid; place-items: center; flex: 0 0 auto;
+    width: 40px; height: 40px; border-radius: 10px;
     background: var(--ad-card); border: 1px solid var(--ad-line);
-    color: var(--ad-ink); font-size: 20px; cursor: pointer;
+    color: var(--ad-ink); font-size: 19px; cursor: pointer;
   }
   .menu-toggle:hover { background: var(--ad-gold); color: var(--ad-sidebar); }
   /* modals must be usable on small screens */
@@ -386,20 +385,21 @@ body.sidebar-open { overflow: hidden; }
   .ulink-btn { padding: 4px 6px; font-size: 10px; }
 
   /* ---- topbar: keep it clean on small screens ---- */
-  .topbar { padding: 10px 12px 10px 58px; gap: 8px; }
-  .topbar .right { gap: 6px; }
+  .topbar { padding: 10px 12px; gap: 8px; }
+  .topbar .left { min-width: 0; overflow: hidden; }
+  .topbar .right { gap: 6px; flex: 0 0 auto; }
   .topbar .search-box { display: none; }
   .topbar .logo-text { display: none; }
-  .topbar .company-select { font-size: 11px; padding: 5px 9px; white-space: nowrap; }
+  .topbar .company-select { font-size: 11px; padding: 5px 9px; white-space: nowrap; flex: 0 0 auto; }
   .topbar h2#pageTitle {
-    font-size: 15px !important; margin: 0 4px !important;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw;
+    font-size: 15px !important; margin: 0 4px !important; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .topbar .icon-btn { width: 32px; height: 32px; font-size: 13px; }
-  .topbar .user-chip { padding: 3px !important; }
+  .topbar .icon-btn { width: 32px; height: 32px; font-size: 13px; flex: 0 0 auto; }
+  .topbar .user-chip { padding: 3px !important; flex: 0 0 auto; }
   .topbar .user-chip span { display: none; }
   /* the global +add button duplicates each section's own add button - hide it */
-  .topbar .btn-gold { display: none !important; }
+  .topbar .top-add-btn { display: none !important; }
 }
 .menu-toggle { background: none; font-size: 22px; color: var(--ad-ink); }
 

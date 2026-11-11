@@ -22,12 +22,13 @@ export async function onRequestGet(context) {
 
   try {
     const { results } = await env.ALALFI_DB.prepare(
-      `SELECT id, username, name, role, device, perms, last_device, last_login, is_active, created_at
+      `SELECT id, username, slug, name, role, device, perms, last_device, last_login, is_active, created_at
          FROM users ORDER BY id`
     ).all();
     const users = (results || []).map((u) => ({
       id: u.id,
       username: u.username,
+      slug: u.slug || '',
       name: u.name,
       role: u.role,
       device: u.device,
@@ -69,12 +70,14 @@ export async function onRequestPut(context) {
 
       const perms = JSON.stringify(u.perms || {});
       const role = u.role === 'superadmin' ? 'superadmin' : 'admin';
+      const slug = String(u.slug || '').trim().toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || null;
 
       if (existing) {
         await env.ALALFI_DB.prepare(
-          `UPDATE users SET name = ?, role = ?, device = ?, perms = ?, updated_at = datetime('now')
+          `UPDATE users SET name = ?, role = ?, device = ?, perms = ?, slug = ?, updated_at = datetime('now')
             WHERE id = ?`
-        ).bind(u.name || '', role, u.device || '', perms, existing.id).run();
+        ).bind(u.name || '', role, u.device || '', perms, slug, existing.id).run();
 
         if (u.password) {
           const salt = randomToken(16);
@@ -90,9 +93,9 @@ export async function onRequestPut(context) {
         const salt = randomToken(16);
         const h = await hashPassword(u.password, salt);
         await env.ALALFI_DB.prepare(
-          `INSERT INTO users (username, name, role, device, perms, password_hash, salt)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).bind(username, u.name || '', role, u.device || '', perms, h, salt).run();
+          `INSERT INTO users (username, slug, name, role, device, perms, password_hash, salt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(username, slug, u.name || '', role, u.device || '', perms, h, salt).run();
       }
     }
 

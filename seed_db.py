@@ -1,19 +1,11 @@
-"""
-Seed the D1 database: create the superadmin account and the initial content.
-Passwords are hashed with SHA-256 + a random salt (same scheme as the API).
+import os, json, subprocess, hashlib, secrets, tempfile, sys
 
-Usage:
-  python seed_db.py <PASSWORD> [USERNAME] [NAME]
-"""
-import sys, os, json, hashlib, secrets, subprocess, tempfile
-
-DB = "alalfi-db"
 ROOT = os.path.dirname(os.path.abspath(__file__))
+DB = "alalfi-db"
 WRANGLER = os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "wrangler", "bin", "wrangler.js")
 
 
-def d1_file(sql_text):
-    """Execute a SQL script through wrangler (avoids shell quoting issues)."""
+def d1(sql_text):
     fd, path = tempfile.mkstemp(suffix=".sql")
     os.close(fd)
     with open(path, "w", encoding="utf-8") as f:
@@ -27,12 +19,8 @@ def d1_file(sql_text):
     except Exception:
         pass
     if p.returncode != 0:
-        raise RuntimeError((p.stderr or p.stdout)[-600:])
+        raise RuntimeError((p.stderr or p.stdout)[-700:])
     return p.stdout
-
-
-def d1(sql_text):
-    return d1_file(sql_text)
 
 
 def esc(v):
@@ -43,22 +31,46 @@ def esc(v):
     return "'" + str(v).replace("'", "''") + "'"
 
 
+def migrate():
+    """Add missing columns to the users table (D1 has no ADD COLUMN IF NOT EXISTS)."""
+    print("==> migrating users table")
+    wanted = {
+        "slug": "TEXT",
+        "device_id": "TEXT",
+        "device_info": "TEXT NOT NULL DEFAULT ''",
+    }
+    for col, typ in wanted.items():
+        try:
+            d1(f"ALTER TABLE users ADD COLUMN {col} {typ};")
+            print(f"    + {col}")
+        except Exception as e:
+            print(f"    = {col} (already there)")
+    try:
+        d1("CREATE INDEX IF NOT EXISTS idx_users_slug ON users(slug);")
+    except Exception:
+        pass
+
+
 def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-    password = sys.argv[1]
+    password = sys.argv[1] if len(sys.argv) > 1 else "Alalfi@2026#Secure"
     username = sys.argv[2] if len(sys.argv) > 2 else "admin"
     name = sys.argv[3] if len(sys.argv) > 3 else "المدير العام"
+    slug = sys.argv[4] if len(sys.argv) > 4 else "admin"
+
+    print("==> applying schema (adds slug + user_devices)")
+    with open(os.path.join(ROOT, "db", "schema.sql"), encoding="utf-8") as f:
+        d1(f.read())
+    migrate()
 
     salt = secrets.token_hex(16)
     h = hashlib.sha256((salt + "::" + password).encode()).hexdigest()
 
-    print(f"==> creating superadmin '{username}'")
-    d1("DELETE FROM sessions;\nDELETE FROM users;")
-    d1("INSERT INTO users (username, name, role, device, perms, password_hash, salt) "
-       f"VALUES ({esc(username)}, {esc(name)}, 'superadmin', {esc('جهاز المدير العام')}, '{{}}', {esc(h)}, {esc(salt)});")
-    print("    done")
+    print(f"==> creating superadmin '{username}' (slug: {slug})")
+    d1("DELETE FROM sessions;")
+    d1("DELETE FROM user_devices;")
+    d1("DELETE FROM users;")
+    d1("INSERT INTO users (username, slug, name, role, device, perms, password_hash, salt) "
+       f"VALUES ({esc(username)}, {esc(slug)}, {esc(name)}, 'superadmin', {esc('جهاز المدير العام')}, '{{}}', {esc(h)}, {esc(salt)});")
 
     print("==> seeding content")
     with open(os.path.join(ROOT, "db", "seed-content.json"), encoding="utf-8") as f:
@@ -69,9 +81,7 @@ def main():
                      f"{esc(key)}, {esc(json.dumps(value, ensure_ascii=False))}, datetime('now'));")
     d1("\n".join(stmts))
     print(f"    {len(content)} collections")
-
-    out = d1("SELECT id, username, role, device FROM users;")
-    print("==> users:", out[-300:])
+    print("DONE")
 
 
 if __name__ == "__main__":

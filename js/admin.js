@@ -162,6 +162,11 @@ function userLoginUrl(username) {
   const base = location.origin + location.pathname;
   return base + '?u=' + encodeURIComponent(username);
 }
+/* the personal device link: https://site.com/admin/<slug> */
+function personalUrl(slug) {
+  const base = location.origin;
+  return base + '/u/' + encodeURIComponent(slug || '');
+}
 function copyText(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -178,10 +183,11 @@ function copyText(id) {
 function renderLogin() {
   const params = new URLSearchParams(location.search);
   const pre = (params.get('u') || '').trim();
+  const link = (params.get('link') || '').trim();
   const known = pre ? data.users.find(x => (x.username || '').toLowerCase() === pre.toLowerCase()) : null;
   let hint = '';
   if (pre && known) hint = 'مرحباً ' + (known.name || known.username) + ' — أدخل كلمة المرور الخاصة بك';
-  else if (pre) hint = 'رابط الدخول غير معروف — تأكد من العنوان';
+  else if (pre && !link) hint = 'رابط الدخول غير معروف — تأكد من العنوان';
   document.getElementById('app').innerHTML = `
     <div class="login-screen">
       <div class="login-box">
@@ -196,7 +202,98 @@ function renderLogin() {
       </div>
     </div>`;
   if (pre) setTimeout(() => { const lp = document.getElementById('lp'); if (lp) lp.focus(); }, 120);
+
+  // personal link -> check / register this device with the account
+  if (link) registerDevice(link);
 }
+
+/* Ask the server whether this device is allowed to use the account */
+function registerDevice(slug) {
+  const box = document.getElementById('app');
+  const banner = document.createElement('div');
+  banner.id = 'deviceBanner';
+  banner.className = 'login-hint';
+  banner.style.margin = '0 0 16px';
+  banner.textContent = 'جارٍ التحقق من الجهاز...';
+  const loginBox = document.querySelector('.login-box');
+  if (loginBox) loginBox.insertBefore(banner, loginBox.querySelector('.form-group'));
+
+  fetch('/api/devices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'register',
+      slug: slug,
+      deviceId: deviceId(),
+      deviceInfo: deviceInfo(),
+    }),
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (!res || !res.ok) { banner.textContent = 'تعذّر التحقق من الجهاز'; return; }
+      if (res.status === 'active') {
+        banner.style.display = 'none';
+        return;
+      }
+      // pending or brand-new -> block the login and show the request code
+      const form = document.querySelector('.login-box');
+      if (form) {
+        form.querySelectorAll('.form-group, .btn-gold, p').forEach(el => { el.style.display = 'none'; });
+      }
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(201,162,39,0.14)';
+      banner.style.border = '1px solid rgba(201,162,39,0.5)';
+      banner.innerHTML = res.status === 'pending'
+        ? '<div style="font-size:15px;font-weight:800;margin-bottom:8px;">⏳ جهازك في انتظار موافقة المدير العام</div>'
+          + '<div style="font-size:12px;opacity:.9;">كود الطلب:</div>'
+          + '<div style="font-size:30px;font-weight:800;letter-spacing:6px;margin:6px 0;color:#f0d68a;">' + (res.code || '-----') + '</div>'
+          + '<div style="font-size:12px;opacity:.9;line-height:1.8;">ابعت الكود للمدير العام عشان يفعّل جهازك من قسم «المستخدمون».<br>جهازك: ' + esc(deviceInfo()) + '</div>'
+        : '<div style="font-size:15px;font-weight:800;margin-bottom:8px;">🔒 هذا الجهاز غير مفعّل على هذا الحساب</div>'
+          + '<div style="font-size:12px;opacity:.9;">كود الطلب:</div>'
+          + '<div style="font-size:30px;font-weight:800;letter-spacing:6px;margin:6px 0;color:#f0d68a;">' + (res.code || '-----') + '</div>'
+          + '<div style="font-size:12px;opacity:.9;line-height:1.8;">ابعت الكود للمدير العام عشان يفعّل جهازك من قسم «المستخدمون».<br>جهازك: ' + esc(deviceInfo()) + '</div>';
+    })
+    .catch(() => { banner.textContent = 'تعذّر الاتصال بالخادم'; });
+}
+/* Unique id for THIS device.
+   It lives in BOTH the cookie (set by the server on the personal link)
+   and localStorage, so the server and the browser always agree. */
+function deviceId() {
+  let id = '';
+  // 1) the cookie the server set
+  const m = document.cookie.match(/(?:^|;\s*)ald_did=([^;]+)/);
+  if (m) { try { id = decodeURIComponent(m[1]); } catch (e) { id = m[1]; } }
+  // 2) localStorage backup
+  if (!id) { try { id = localStorage.getItem('ald_did') || ''; } catch (e) { id = ''; } }
+  // 3) create one
+  if (!id) {
+    id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : (Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+  }
+  // 4) keep both in sync
+  try { localStorage.setItem('ald_did', id); } catch (e) {}
+  try {
+    document.cookie = 'ald_did=' + encodeURIComponent(id) + '; path=/; max-age=31536000; SameSite=Lax';
+  } catch (e) {}
+  return id;
+}
+function deviceInfo() {
+  const ua = navigator.userAgent || '';
+  const os = /Windows NT 10/.test(ua) ? 'Windows'
+    : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+    : /Mac OS X/.test(ua) ? 'macOS'
+    : /Linux/.test(ua) ? 'Linux' : 'نظام غير معروف';
+  const br = /Edg\//.test(ua) ? 'Edge'
+    : /OPR\//.test(ua) ? 'Opera'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) && !/Chrome/.test(ua) ? 'Safari'
+    : /Firefox\//.test(ua) ? 'Firefox' : 'متصفح';
+  const mob = /Mobi|Android|iPhone|iPad/i.test(ua) ? ' - موبايل' : ' - كمبيوتر';
+  const scr = (window.screen && screen.width) ? ' ' + screen.width + 'x' + screen.height : '';
+  return os + ' / ' + br + mob + scr;
+}
+
 function detectDevice() {
   const ua = navigator.userAgent || '';
   const os = /Windows NT 10/.test(ua) ? 'Windows'
@@ -224,7 +321,12 @@ function doLogin() {
   fetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: u, password: p, device: detectDevice() }),
+    body: JSON.stringify({
+      username: u, password: p,
+      device: detectDevice(),
+      deviceId: deviceId(),
+      deviceInfo: deviceInfo(),
+    }),
   })
     .then(r => r.json())
     .then(res => {
@@ -342,7 +444,6 @@ function renderApp() {
           <div style="text-align:center;font-size:10px;color:#8fa0b8;margin-top:4px;">v1.0</div>
         </div>
       </aside>
-      <button class="menu-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="فتح القائمة">☰</button>
       <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
       <div class="main">
         <div class="topbar">
@@ -359,7 +460,8 @@ function renderApp() {
               <div class="av" style="width:28px;height:28px;border-radius:50%;background:var(--ad-gold);display:grid;place-items:center;font-weight:800;color:var(--ad-sidebar);font-size:11px;">${(session.name||session.username).charAt(0)}</div>
               <span style="font-size:12px;font-weight:700;">${session.name||session.username}</span>
             </div>
-            <button class="btn btn-gold btn-sm" onclick="openQuickAdd()">+ إضافة</button>
+            <button class="btn btn-gold btn-sm top-add-btn" onclick="openQuickAdd()">+ إضافة</button>
+            <button class="menu-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="فتح القائمة">☰</button>
           </div>
         </div>
         <div class="content" id="content"></div>
@@ -1188,13 +1290,14 @@ function renderUsers(c) {
           </td>
           <td class="ulink-cell">
             <div class="ulink-row">
-              <input readonly value="${esc(link)}" id="ulink_${u.id}" class="ulink-input">
+              <input readonly value="${esc(u.slug ? personalUrl(u.slug) : link)}" id="ulink_${u.id}" class="ulink-input">
               <button class="btn btn-outline-ad ulink-btn" onclick="copyText('ulink_${u.id}')">نسخ</button>
-              <a class="btn btn-outline-ad ulink-btn" href="${esc(link)}" target="_blank">فتح</a>
+              <a class="btn btn-outline-ad ulink-btn" href="${esc(u.slug ? personalUrl(u.slug) : link)}" target="_blank">فتح</a>
             </div>
           </td>
           <td>
             <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;" onclick="editUser(${u.id})">تعديل</button>
+            <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;" onclick="openDevices(${u.id})">الأجهزة</button>
             ${u.id !== session.id ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:11px;" onclick="deleteUser(${u.id})">حذف</button>` : ''}
           </td>
         </tr>`;
@@ -1223,6 +1326,9 @@ function userForm(u) {
     <div class="form-grid">
       <div class="form-group"><label>اسم المستخدم</label><input id="f_username" value="${esc(u?.username)}"></div>
       <div class="form-group"><label>الاسم</label><input id="f_name" value="${esc(u?.name)}"></div>
+      <div class="form-group"><label>الرابط الشخصي (slug)</label><input id="f_slug" value="${esc(u?.slug || '')}" placeholder="ahmed" oninput="previewSlug(this.value)">
+        <small style="font-size:11px;color:var(--ad-muted);">الرابط: <span id="slugPreview">${esc(personalUrl(u?.slug || 'ahmed'))}</span></small>
+      </div>
       <div class="form-group"><label>الجهاز / الجهاز المخصص</label><input id="f_device" value="${esc(u?.device || '')}" placeholder="مثال: مكتب 1 - الدور الثالث"></div>
       <div class="form-group"><label>كلمة المرور</label><input id="f_password" type="password" value="${esc(u?.password)}"></div>
       <div class="form-group"><label>الدور</label>
@@ -1274,8 +1380,10 @@ function saveUser(id) {
   }
 
   const deviceField = document.getElementById('f_device');
+  const slugField = document.getElementById('f_slug');
   const obj = {
     username,
+    slug: slugField ? slugField.value.trim() : '',
     name: document.getElementById('f_name').value.trim(),
     role,
     perms,
@@ -1451,6 +1559,61 @@ function changeMyPassword() {
       }
     })
     .catch(() => toast('تعذّر الاتصال بالخادم', true));
+}
+
+/* ===== Devices manager (per user) ===== */
+function previewSlug(v) {
+  const el = document.getElementById('slugPreview');
+  if (el) el.textContent = personalUrl(v.trim() || 'ahmed');
+}
+function openDevices(userId) {
+  const u = data.users.find(x => x.id === userId);
+  const name = u ? (u.name || u.username) : '';
+  openModal('<h3>أجهزة: ' + esc(name) + '</h3><div id="devList"><p style="color:var(--ad-muted)">جارٍ التحميل...</p></div>'
+    + '<div class="footer"><button class="btn btn-outline-ad" onclick="closeModal()">إغلاق</button></div>');
+
+  fetch('/api/devices', { headers: sessionHeaders() })
+    .then(r => r.json())
+    .then(res => {
+      const box = document.getElementById('devList');
+      if (!box) return;
+      if (!res || !res.ok) { box.innerHTML = '<p style="color:#f2a0a0">' + esc((res && res.error) || 'خطأ') + '</p>'; return; }
+      const list = (res.devices || []).filter(d => d.user_id === userId);
+      if (!list.length) { box.innerHTML = '<p style="color:var(--ad-muted)">لا توجد أجهزة مسجّلة. أول جهاز يفتح الرابط هيتربط تلقائياً.</p>'; return; }
+      const badge = { active: 'badge-green', pending: 'badge-gold', rejected: 'badge' };
+      const label = { active: 'مفعّل', pending: 'بانتظار الموافقة', rejected: 'مرفوض' };
+      box.innerHTML = list.map(d => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;border:1px solid var(--ad-line);border-radius:10px;margin-bottom:8px;flex-wrap:wrap;">
+          <div style="min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:var(--ad-ink);">${esc(d.device_info || 'جهاز غير معروف')}</div>
+            <div style="font-size:10px;color:var(--ad-muted);margin-top:3px;word-break:break-all;">${esc(d.device_id.slice(0,18))}...</div>
+            <div style="font-size:10px;color:var(--ad-muted);">آخر ظهور: ${esc(d.last_seen || '—')}</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="badge ${badge[d.status] || ''}">${label[d.status] || d.status}</span>
+            ${d.status === 'pending' ? `<button class="btn btn-gold" style="padding:4px 10px;font-size:11px;" onclick="deviceAction('approve','${esc(d.device_id)}',${d.user_id})">تفعيل</button>
+            <button class="btn btn-outline-ad" style="padding:4px 10px;font-size:11px;" onclick="deviceAction('reject','${esc(d.device_id)}',${d.user_id})">رفض</button>` : ''}
+            <button class="btn btn-danger" style="padding:4px 10px;font-size:11px;" onclick="deviceAction('unbind','${esc(d.device_id)}',${d.user_id})">إزالة</button>
+          </div>
+        </div>`).join('');
+    })
+    .catch(() => {
+      const box = document.getElementById('devList');
+      if (box) box.innerHTML = '<p style="color:#f2a0a0">تعذّر الاتصال</p>';
+    });
+}
+function deviceAction(action, deviceId, userId) {
+  fetch('/api/devices', {
+    method: 'POST',
+    headers: sessionHeaders(),
+    body: JSON.stringify({ action: action, deviceId: deviceId, userId: userId }),
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok) { toast('تم التحديث'); openDevices(userId); pullGlobal(true); }
+      else toast('فشل: ' + ((res && res.error) || 'خطأ'), true);
+    })
+    .catch(() => toast('تعذّر الاتصال', true));
 }
 
 /* ===== Modal helpers ===== */
