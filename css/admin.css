@@ -398,7 +398,8 @@ body.sidebar-open { overflow: hidden; }
   .topbar .icon-btn { width: 32px; height: 32px; font-size: 13px; }
   .topbar .user-chip { padding: 3px !important; }
   .topbar .user-chip span { display: none; }
-  .topbar .btn-gold { padding: 7px 10px !important; font-size: 12px !important; }
+  /* the global +add button duplicates each section's own add button - hide it */
+  .topbar .btn-gold { display: none !important; }
 }
 .menu-toggle { background: none; font-size: 22px; color: var(--ad-ink); }
 
