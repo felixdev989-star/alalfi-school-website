@@ -28,6 +28,9 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const { env } = context;
+  if (!env.CONTENT) {
+    return json({ ok: false, error: 'KV binding missing (CONTENT)' }, 500);
+  }
   try {
     const raw = await env.CONTENT.get(KEY, 'json');
     if (!raw) return json({ ok: true, empty: true, data: null });

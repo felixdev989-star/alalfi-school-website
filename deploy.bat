@@ -2,21 +2,21 @@
 REM ============================================================
 REM  One-command deploy for the AlAlfi school website
 REM  Usage:  deploy.bat  [GITHUB_TOKEN] [CLOUDFLARE_TOKEN]
-REM  (tokens can also be set as env vars, or left empty to
-REM   skip that platform)
 REM ============================================================
-setlocal
+setlocal enabledelayedexpansion
 
 set "PROJECT_DIR=%~dp0"
 set "WRANGLER=%APPDATA%\npm\node_modules\wrangler\bin\wrangler.js"
+set "CF_ACCOUNT=78b027e0bbc93bc080113f41d3cd49e8"
+set "CF_PROJECT=alalfi-school"
 
-if "%~1"=="" set "GH_TOKEN=%GITHUB_TOKEN%" else set "GH_TOKEN=%~1"
-if "%~2"=="" set "CF_TOKEN=%CLOUDFLARE_API_TOKEN%" else set "CF_TOKEN=%~2"
+if "%~1"=="" (set "GH_TOKEN=%GITHUB_TOKEN%") else (set "GH_TOKEN=%~1")
+if "%~2"=="" (set "CF_TOKEN=%CLOUDFLARE_API_TOKEN%") else (set "CF_TOKEN=%~2")
 
 cd /d "%PROJECT_DIR%"
 
 echo.
-echo ==== [1/2] GitHub ====
+echo ==== [1/3] GitHub ====
 if "%GH_TOKEN%"=="" (
   echo   skipped - no GitHub token
 ) else (
@@ -24,12 +24,18 @@ if "%GH_TOKEN%"=="" (
 )
 
 echo.
-echo ==== [2/2] Cloudflare Pages ====
+echo ==== [2/3] Cloudflare Pages ====
 if "%CF_TOKEN%"=="" (
   echo   skipped - no Cloudflare token
 ) else (
   set "CLOUDFLARE_API_TOKEN=%CF_TOKEN%"
-  node "%WRANGLER%" pages deploy . --project-name alalfi-school --branch main --commit-dirty=true
+  node "%WRANGLER%" pages deploy . --project-name %CF_PROJECT% --branch main --commit-dirty=true
+)
+
+echo.
+echo ==== [3/3] Verify KV binding + publish secret ====
+if not "%CF_TOKEN%"=="" (
+  python ensure_cloudflare.py "%CF_TOKEN%" %CF_ACCOUNT% %CF_PROJECT%
 )
 
 echo.
