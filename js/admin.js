@@ -1449,13 +1449,17 @@ function deleteUser(id) {
   if (target.role === 'superadmin') { toast('لا يمكن حذف حساب المدير العام (superadmin)', true); return; }
   if (target.id === session.id) { toast('لا يمكنك حذف حسابك الحالي', true); return; }
   if (!confirm('حذف المستخدم "' + (target.name || target.username) + '"؟')) return;
-  fetch('/api/users/' + id, { method: 'DELETE', headers: sessionHeaders() })
+  fetch('/api/users', {
+    method: 'DELETE',
+    headers: sessionHeaders(),
+    body: JSON.stringify({ id: id }),
+  })
     .then(r => r.json())
     .then(res => {
-      if (res && res.ok) { pullGlobal(true); toast('تم الحذف من الخادم'); }
+      if (res && res.ok) { pullGlobal(true); toast('تم حذف المستخدم'); }
       else toast('فشل: ' + ((res && res.error) || 'خطأ'), true);
     })
-    .catch(() => toast('تعذّر الاتصال بالخادم', true));
+    .catch((e) => toast('تعذّر الاتصال بالخادم (' + (e && e.message ? e.message : 'خطأ') + ')', true));
 }
 
 /* ===== My account (per-user login link + password) ===== */

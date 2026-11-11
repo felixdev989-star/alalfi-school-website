@@ -109,7 +109,10 @@ export async function onRequestPut(context) {
   }
 }
 
-/* ---------------- delete ---------------- */
+/* ---------------- delete ----------------
+   DELETE /api/users   body: { id: 12 }              -> delete one user
+   DELETE /api/users   body: { id: 0, all: true }     -> delete every other user
+*/
 export async function onRequestDelete(context) {
   const { request, env } = context;
   const missing = noDb(env, request);
@@ -121,28 +124,36 @@ export async function onRequestDelete(context) {
     return json({ ok: false, error: 'superadmin only' }, 403, request);
   }
 
-  const path = new URL(request.url).pathname;
-  const m = path.match(/\/users\/(\d+)$/);
+  const payload = await readJson(request);
+  if (!payload) return json({ ok: false, error: 'invalid json' }, 400, request);
 
   try {
-    if (m) {
-      const id = parseInt(m[1], 10);
-      const t = await env.ALALFI_DB.prepare('SELECT role FROM users WHERE id = ?').bind(id).first();
-      if (!t) return json({ ok: false, error: 'user not found' }, 404, request);
-      if (t.role === 'superadmin') {
-        return json({ ok: false, error: 'لا يمكن حذف حساب المدير العام' }, 403, request);
-      }
-      await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
-      await env.ALALFI_DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
-      await env.ALALFI_DB.prepare(
-        `INSERT INTO audit_log (user_id, action, detail) VALUES (?, 'user_deleted', ?)`
-      ).bind(auth.user.id, String(id)).run();
-      return json({ ok: true, deleted: id }, 200, request);
+    // id may also come from the path (/api/users/12)
+    const m = new URL(request.url).pathname.match(/\/users\/(\d+)$/);
+    const id = parseInt(payload.id || (m ? m[1] : 0), 10);
+
+    if (payload.all || !id) {
+      await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE user_id != ?').bind(auth.user.id).run();
+      await env.ALALFI_DB.prepare('DELETE FROM user_devices WHERE user_id != ?').bind(auth.user.id).run();
+      await env.ALALFI_DB.prepare('DELETE FROM users WHERE id != ?').bind(auth.user.id).run();
+      return json({ ok: true, deletedAll: true }, 200, request);
     }
 
-    await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE user_id != ?').bind(auth.user.id).run();
-    await env.ALALFI_DB.prepare('DELETE FROM users WHERE id != ?').bind(auth.user.id).run();
-    return json({ ok: true, deletedAll: true }, 200, request);
+    if (id === auth.user.id) {
+      return json({ ok: false, error: 'لا يمكنك حذف حسابك الحالي' }, 400, request);
+    }
+    const target = await env.ALALFI_DB.prepare('SELECT id, username, role FROM users WHERE id = ?').bind(id).first();
+    if (!target) return json({ ok: false, error: 'المستخدم غير موجود' }, 404, request);
+    if (target.role === 'superadmin') {
+      return json({ ok: false, error: 'لا يمكن حذف حساب مدير عام' }, 403, request);
+    }
+    await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
+    await env.ALALFI_DB.prepare('DELETE FROM user_devices WHERE user_id = ?').bind(id).run();
+    await env.ALALFI_DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
+    await env.ALALFI_DB.prepare(
+      `INSERT INTO audit_log (user_id, action, detail) VALUES (?, 'user_deleted', ?)`
+    ).bind(auth.user.id, String(target.username)).run();
+    return json({ ok: true, deleted: id }, 200, request);
   } catch (e) {
     return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
   }

@@ -97,16 +97,7 @@ export async function onRequestPost(context) {
         return json({ ok: true, status: 'pending', code: code, username: user.username }, 200, request);
       }
 
-      // first device of the account binds automatically
-      if (total === 0) {
-        await env.ALALFI_DB.prepare(
-          `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
-           VALUES (?, ?, ?, 'active', datetime('now'))
-           ON CONFLICT(user_id, device_id) DO UPDATE SET status='active', device_info=excluded.device_info`
-        ).bind(user.id, deviceId, deviceInfo).run();
-        return json({ ok: true, status: 'active', username: user.username }, 200, request);
-      }
-
+      // EVERY new device needs the superadmin's approval first
       const ins = await env.ALALFI_DB.prepare(
         `INSERT INTO user_devices (user_id, device_id, device_info, status)
          VALUES (?, ?, ?, 'pending')
@@ -114,7 +105,13 @@ export async function onRequestPost(context) {
       ).bind(user.id, deviceId, deviceInfo).run();
       const newId = (ins && ins.meta && ins.meta.last_row_id) || 0;
       const code = (user.id * 1000 + newId) % 100000;
-      return json({ ok: true, status: 'new', code: code, username: user.username }, 200, request);
+      return json({
+        ok: true,
+        status: 'new',
+        code: code,
+        first: total === 0,
+        username: user.username,
+      }, 200, request);
     } catch (e) {
       return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
     }
