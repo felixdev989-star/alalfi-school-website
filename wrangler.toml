@@ -1,8 +1,3 @@
 name = "alalfi-school"
 compatibility_date = "2026-11-10"
 pages_build_output_dir = "."
-
-[[kv_namespaces]]
-binding = "CONTENT"
-id = "14df389d3ff14aa095c769362d2965cc"
-remote = true

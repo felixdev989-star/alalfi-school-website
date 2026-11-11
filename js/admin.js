@@ -72,7 +72,7 @@ const defaultData = () => ({
     { id: 3, name: 'د. وفاء طلبة', role: 'مدير عام الإدارة', bio: 'مدير عام إدارة منيا القمح التعليمية.', img: '' },
   ],
   users: [
-    { id: 1, username: 'admin', password: 'admin123', role: 'superadmin', name: 'المدير' },
+    { id: 1, username: 'admin', password: 'admin123', role: 'superadmin', name: 'المدير', device: 'جهاز المدير العام', lastDevice: '', lastLogin: '' },
   ],
   media: [],
 });
@@ -193,13 +193,40 @@ function renderLogin() {
     </div>`;
   if (pre) setTimeout(() => { const lp = document.getElementById('lp'); if (lp) lp.focus(); }, 120);
 }
+function detectDevice() {
+  const ua = navigator.userAgent || '';
+  const os = /Windows NT 10/.test(ua) ? 'Windows'
+    : /Windows/.test(ua) ? 'Windows'
+    : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+    : /Mac OS X/.test(ua) ? 'macOS'
+    : /Linux/.test(ua) ? 'Linux' : 'غير معروف';
+  const br = /Edg\//.test(ua) ? 'Edge'
+    : /OPR\//.test(ua) ? 'Opera'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) && !/Chrome/.test(ua) ? 'Safari'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Edge\//.test(ua) ? 'Edge' : 'متصفح';
+  const mob = /Mobi|Android|iPhone|iPad/i.test(ua) ? ' - موبايل' : '';
+  return os + ' / ' + br + mob;
+}
+
 function doLogin() {
   const u = document.getElementById('lu').value.trim();
   const p = document.getElementById('lp').value;
   const user = data.users.find(x => x.username === u && x.password === p);
   if (!user) { toast('اسم المستخدم أو كلمة المرور غير صحيحة', true); return; }
-  session = { id: user.id, username: user.username, name: user.name, role: user.role };
+  session = { id: user.id, username: user.username, name: user.name, role: user.role, device: user.device || '' };
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+
+  // record device + last login
+  try {
+    user.lastDevice = detectDevice();
+    user.lastLogin = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    syncGlobal(data, true);
+  } catch (e) { /* ignore */ }
+
   renderApp();
 }
 function doLogout() {
@@ -1104,13 +1131,18 @@ function renderUsers(c) {
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>اسم المستخدم</th><th>الاسم</th><th>الدور</th><th>رابط الدخول الخاص</th><th>الإجراءات</th></tr></thead>
+        <thead><tr><th>اسم المستخدم</th><th>الاسم</th><th>الدور</th><th>الجهاز المخصص</th><th>آخر جهاز / دخول</th><th>رابط الدخول الخاص</th><th>الإجراءات</th></tr></thead>
         <tbody>${data.users.map(u => {
           const link = userLoginUrl(u.username);
           return `<tr>
           <td><code style="font-size:12px;color:var(--ad-gold);">${esc(u.username)}</code></td><td>${esc(u.name)}</td><td>
             <span class="badge ${u.role==='superadmin'?'badge-gold':'badge-green'}">${u.role==='superadmin'?'مدير عام':'محرر'}</span>
             ${u.role !== 'superadmin' ? `<div style="font-size:10px;color:var(--ad-muted);margin-top:4px;line-height:1.5;">${permSummary(u.perms)}</div>` : ''}
+          </td>
+          <td style="font-size:12px;white-space:nowrap;">${esc(u.device || '—')}</td>
+          <td style="font-size:11px;color:var(--ad-muted);white-space:nowrap;line-height:1.6;">
+            ${esc(u.lastDevice || '—')}<br>
+            <span style="font-size:10px;">${u.lastLogin ? esc(new Date(u.lastLogin).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })) : 'لم يسجل دخول بعد'}</span>
           </td>
           <td>
             <div style="display:flex;gap:6px;align-items:center;min-width:260px;">
@@ -1149,6 +1181,7 @@ function userForm(u) {
     <div class="form-grid">
       <div class="form-group"><label>اسم المستخدم</label><input id="f_username" value="${esc(u?.username)}"></div>
       <div class="form-group"><label>الاسم</label><input id="f_name" value="${esc(u?.name)}"></div>
+      <div class="form-group"><label>الجهاز / الجهاز المخصص</label><input id="f_device" value="${esc(u?.device || '')}" placeholder="مثال: مكتب 1 - الدور الثالث"></div>
       <div class="form-group"><label>كلمة المرور</label><input id="f_password" type="password" value="${esc(u?.password)}"></div>
       <div class="form-group"><label>الدور</label>
         <select id="f_role"><option value="admin" ${u?.role!=='superadmin'?'selected':''}>admin</option><option value="superadmin" ${u?.role==='superadmin'?'selected':''}>superadmin</option></select>
@@ -1197,7 +1230,15 @@ function saveUser(id) {
     perms.users = 'none';
   }
 
-  const obj = { username, name: document.getElementById('f_name').value.trim(), password: document.getElementById('f_password').value, role, perms };
+  const deviceField = document.getElementById('f_device');
+  const obj = {
+    username,
+    name: document.getElementById('f_name').value.trim(),
+    password: document.getElementById('f_password').value,
+    role,
+    perms,
+    device: deviceField ? deviceField.value.trim() : '',
+  };
 
   if (id) {
     const i = data.users.findIndex(u=>u.id===id);
@@ -1232,6 +1273,9 @@ function renderAccount(c) {
         <div class="form-group"><label>اسم المستخدم</label><input value="${esc(u.username)}" readonly></div>
         <div class="form-group"><label>الاسم</label><input value="${esc(u.name || '')}" readonly></div>
         <div class="form-group"><label>الدور</label><input value="${esc(u.role)}" readonly></div>
+        <div class="form-group"><label>الجهاز المخصص (بتحدده انت)</label><input id="myDevice" value="${esc(u.device || '')}" placeholder="مثال: مكتب 1 - الدور الثالث"></div>
+        <div class="form-group"><label>آخر جهاز تم منه الدخول</label><input value="${esc(u.lastDevice || '—')}" readonly></div>
+        <div class="form-group"><label>آخر دخول</label><input value="${u.lastLogin ? esc(new Date(u.lastLogin).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })) : '—'}" readonly></div>
       </div>
     </div>
 
@@ -1264,10 +1308,23 @@ function renderAccount(c) {
         <div class="form-group"><label>كلمة المرور الجديدة</label><input id="cp_new" type="password"></div>
         <div class="form-group"><label>تأكيد كلمة المرور</label><input id="cp_new2" type="password"></div>
       </div>
-      <div style="margin-top:16px;text-align:left;">
+      <div style="margin-top:16px;text-align:left;display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn btn-gold" onclick="changeMyPassword()">تحديث كلمة المرور</button>
+        <button class="btn btn-outline-ad" onclick="saveMyDevice()">حفظ اسم الجهاز</button>
       </div>
     </div>`;
+}
+function saveMyDevice() {
+  const el = document.getElementById('myDevice');
+  if (!el) return;
+  const u = data.users.find(x => x.id === session.id);
+  if (!u) { toast('الحساب غير موجود', true); return; }
+  u.device = el.value.trim();
+  session.device = u.device;
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  if (!saveData(data)) return;
+  toast('تم حفظ اسم الجهاز');
+  renderSection('account');
 }
 function saveEditToken() {
   const v = document.getElementById('editToken').value.trim();
