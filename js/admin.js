@@ -1,5 +1,7 @@
 /* ===== Admin Panel Logic ===== */
 const STORAGE_KEY = 'alalfi_admin_v1';
+/* الجلسة (session token) تُخزَّن في sessionStorage فقط - تُمسح تلقائياً
+   لما يقفل المتصفح أو التبويب. */
 const SESSION_KEY = 'alalfi_admin_session';
 const EDIT_TOKEN_KEY = 'alalfi_edit_token';
 let charts = {};
@@ -72,7 +74,8 @@ const defaultData = () => ({
     { id: 3, name: 'د. وفاء طلبة', role: 'مدير عام الإدارة', bio: 'مدير عام إدارة منيا القمح التعليمية.', img: '' },
   ],
   users: [
-    { id: 1, username: 'admin', password: 'admin123', role: 'superadmin', name: 'المدير', device: 'جهاز المدير العام', lastDevice: '', lastLogin: '' },
+    /* لا يوجد أي حساب افتراضي هنا - الحسابات كلها في قاعدة البيانات (D1)
+       وتُدار من "المستخدمون" بواسطة المدير العام فقط. */
   ],
   media: [],
 });
@@ -102,59 +105,41 @@ function syncGlobal(d, silent) {
   try {
     clearTimeout(_syncTimer);
     _syncTimer = setTimeout(() => {
-      const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
-      const headers = { 'Content-Type': 'application/json', 'X-Edit-Token': token };
-
-      // users are stored separately (and hashed server-side) - never in the public blob
-      const users = d.users || [];
+      if (!sessionToken()) return;
       const content = Object.assign({}, d);
       delete content.users;
 
       fetch('/api/data', {
         method: 'PUT',
-        headers: headers,
+        headers: sessionHeaders(),
         body: JSON.stringify({ data: content }),
       })
         .then(r => r.json())
         .then(res => {
-          if (!res || !res.ok) {
-            if (!silent) toast('تم الحفظ محلياً — تعذّر النشر العام: ' + ((res && res.error) || 'خطأ'), true);
-            return null;
-          }
-          return fetch('/api/users', {
-            method: 'PUT',
-            headers: headers,
-            body: JSON.stringify({ users: users }),
-          }).then(r2 => r2.json());
-        })
-        .then(res2 => {
-          if (res2 === null) return;
-          if (res2 && res2.ok) {
+          if (res && res.ok) {
             if (!silent) toast('تم الحفظ والنشر للجميع');
-          } else {
-            if (!silent) toast('تم نشر المحتوى — تعذّر حفظ المستخدمين: ' + ((res2 && res2.error) || ''), true);
+          } else if (res && res.error && /session/i.test(res.error)) {
+            endSession(); renderLogin(); toast('انتهت الجلسة - سجّل دخول تاني', true);
+          } else if (!silent) {
+            toast('تعذّر النشر: ' + ((res && res.error) || 'خطأ'), true);
           }
         })
-        .catch(() => {
-          if (!silent) toast('تم الحفظ محلياً فقط (الموقع مش متصل بالسيرفر)', true);
-        });
+        .catch(() => { if (!silent) toast('تعذّر الاتصال بالخادم', true); });
     }, 350);
   } catch (e) { /* ignore */ }
 }
 
 function saveData(d) {
+  // local cache only - the server (D1) is the source of truth
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
-  } catch (e) {
-    toast('فشل الحفظ: البيانات كبيرة جداً (quota). استخدم روابط بدلاً من رفع ملفات.', true);
-    return false;
-  }
-  syncGlobal(d, false);
+  } catch (e) { /* quota - the server copy still saves */ }
+  if (sessionToken()) syncGlobal(d, false);
   return true;
 }
 
 let data = loadData();
-let session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+let session = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
 
 function uid(arr) { return (arr.reduce((m, x) => Math.max(m, x.id || 0), 0) || 0) + 1; }
 function readFileAsDataURL(file) { return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = e => resolve(e.target.result); r.onerror = reject; r.readAsDataURL(file); }); }
@@ -205,9 +190,9 @@ function renderLogin() {
         <p>مدرسة الالفي الثانوية المشتركة</p>
         ${hint ? '<div class="login-hint">' + hint + '</div>' : ''}
         <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="${esc(pre)}"${pre ? ' readonly' : ''}></div>
-        <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password"></div>
+        <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password" autocomplete="current-password"></div>
         <button class="btn btn-gold" style="width:100%;padding:12px;margin-top:8px;" onclick="doLogin()">تسجيل الدخول</button>
-        ${pre ? '' : '<p style="margin-top:14px;font-size:11px;color:#8fa0b8;">الافتراضي: admin / admin123</p>'}
+        ${pre ? '' : '<p style="margin-top:14px;font-size:11px;color:#8fa0b8;">الدخول يتم التحقق منه على الخادم - الحسابات يديرها المدير العام فقط</p>'}
       </div>
     </div>`;
   if (pre) setTimeout(() => { const lp = document.getElementById('lp'); if (lp) lp.focus(); }, 120);
@@ -233,15 +218,9 @@ function detectDevice() {
 function doLogin() {
   const u = document.getElementById('lu').value.trim();
   const p = document.getElementById('lp').value;
+  const btn = document.querySelector('#app .btn-gold');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التحقق...'; }
 
-  // 1) local check (this browser)
-  const local = data.users.find(x => x.username === u && x.password === p);
-  if (local) {
-    finishLogin(local);
-    return;
-  }
-
-  // 2) server check (any device) - the server stores only a hash
   fetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -249,45 +228,31 @@ function doLogin() {
   })
     .then(r => r.json())
     .then(res => {
-      if (res && res.ok && res.user) {
-        const su = res.user;
-        const existing = data.users.find(x => (x.username || '').toLowerCase() === u.toLowerCase());
-        const rec = existing || {
-          id: su.id || uid(data.users),
-          username: su.username,
-          name: su.name || '',
-          role: su.role || 'admin',
-          perms: su.perms || {},
-          device: su.device || '',
-        };
-        rec.password = p;                       // keep locally for next time
-        rec.lastDevice = su.lastDevice || detectDevice();
-        rec.lastLogin = su.lastLogin || new Date().toISOString();
-        if (!existing) data.users.push(rec);
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
-        finishLogin(rec);
-      } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول'; }
+      if (!res || !res.ok) {
         toast('اسم المستخدم أو كلمة المرور غير صحيحة', true);
+        return;
       }
+      session = {
+        id: res.user.id, username: res.user.username, name: res.user.name,
+        role: res.user.role, device: res.user.device || '', token: res.token,
+      };
+      try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+      // pull the user's list + content from the server
+      pullGlobal(true);
+      renderApp();
+      toast('تم تسجيل الدخول بنجاح');
     })
-    .catch(() => toast('اسم المستخدم أو كلمة المرور غير صحيحة', true));
+    .catch(() => {
+      if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول'; }
+      toast('تعذّر الاتصال بالخادم', true);
+    });
 }
 
-function finishLogin(user) {
-  session = { id: user.id, username: user.username, name: user.name, role: user.role, device: user.device || '' };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  try {
-    user.lastDevice = detectDevice();
-    user.lastLogin = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    syncGlobal(data, true);
-  } catch (e) { /* ignore */ }
-  renderApp();
-}
 function doLogout() {
-  session = null;
-  localStorage.removeItem(SESSION_KEY);
+  endSession();
   renderLogin();
+  toast('تم تسجيل الخروج');
 }
 
 /* ===== App shell ===== */
@@ -1272,6 +1237,7 @@ function saveUser(id) {
   const username = document.getElementById('f_username').value.trim();
   if (!username) { toast('اسم المستخدم مطلوب', true); return; }
   const role = document.getElementById('f_role').value;
+  const password = document.getElementById('f_password').value;
 
   // collect permissions
   const perms = {};
@@ -1289,23 +1255,36 @@ function saveUser(id) {
   const obj = {
     username,
     name: document.getElementById('f_name').value.trim(),
-    password: document.getElementById('f_password').value,
     role,
     perms,
     device: deviceField ? deviceField.value.trim() : '',
   };
+  if (password) obj.password = password;      // only sent when typed
 
-  if (id) {
-    const i = data.users.findIndex(u=>u.id===id);
-    if (i === -1) return;
-    const target = data.users[i];
+  const target = id ? data.users.find(u => u.id === id) : null;
+  if (target) {
     if (target.role === 'superadmin' && role !== 'superadmin' && !confirm('أنت بتقلّل صلاحيات المدير العام. متأكد؟')) return;
-    data.users[i] = { ...target, ...obj };
-  } else {
-    obj.id = uid(data.users);
-    data.users.push(obj);
+    obj.id = target.id;
   }
-  if (!saveData(data)) return; closeModal(); renderSection('users'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
+  if (!target && !password) { toast('كلمة المرور مطلوبة للمستخدم الجديد', true); return; }
+
+  // send to the server (it hashes the password)
+  fetch('/api/users', {
+    method: 'PUT',
+    headers: sessionHeaders(),
+    body: JSON.stringify({ users: [obj] }),
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok) {
+        closeModal();
+        pullGlobal(true);
+        toast('تم الحفظ على الخادم');
+      } else {
+        toast('فشل: ' + ((res && res.error) || 'خطأ'), true);
+      }
+    })
+    .catch(() => toast('تعذّر الاتصال بالخادم', true));
 }
 function deleteUser(id) {
   const target = data.users.find(u=>u.id===id);
@@ -1313,8 +1292,13 @@ function deleteUser(id) {
   if (target.role === 'superadmin') { toast('لا يمكن حذف حساب المدير العام (superadmin)', true); return; }
   if (target.id === session.id) { toast('لا يمكنك حذف حسابك الحالي', true); return; }
   if (!confirm('حذف المستخدم "' + (target.name || target.username) + '"؟')) return;
-  data.users = data.users.filter(u=>u.id!==id);
-  if (!saveData(data)) return; renderSection('users'); toast('تم الحذف — أعد تحميل صفحة الموقع');
+  fetch('/api/users/' + id, { method: 'DELETE', headers: sessionHeaders() })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok) { pullGlobal(true); toast('تم الحذف من الخادم'); }
+      else toast('فشل: ' + ((res && res.error) || 'خطأ'), true);
+    })
+    .catch(() => toast('تعذّر الاتصال بالخادم', true));
 }
 
 /* ===== My account (per-user login link + password) ===== */
@@ -1376,8 +1360,8 @@ function saveMyDevice() {
   if (!u) { toast('الحساب غير موجود', true); return; }
   u.device = el.value.trim();
   session.device = u.device;
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  if (!saveData(data)) return;
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+  saveData(data);
   toast('تم حفظ اسم الجهاز');
   renderSection('account');
 }
@@ -1394,7 +1378,7 @@ function publishNow() {
   if (st) st.textContent = 'جاري النشر...';
   fetch('/api/data', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+    headers: sessionHeaders(),
     body: JSON.stringify({ data: data }),
   })
     .then(r => r.json())
@@ -1408,7 +1392,7 @@ function resetGlobal() {
   const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
   if (!token) { toast('ألصق مفتاح النشر أولاً', true); return; }
   if (!confirm('هيتمسح المحتوى المنشور على السيرفر لكل الزوار وترجع الإعدادات الافتراضية. متأكد؟')) return;
-  fetch('/api/data', { method: 'DELETE', headers: { 'X-Edit-Token': token } })
+  fetch('/api/data', { method: 'DELETE', headers: sessionHeaders() })
     .then(r => r.json())
     .then(res => {
       if (res && res.ok) { toast('تم إعادة تعيين المحتوى العام'); setTimeout(() => location.reload(), 900); }
@@ -1422,14 +1406,29 @@ function changeMyPassword() {
   const n2 = document.getElementById('cp_new2').value;
   if (!n1) { toast('كلمة المرور الجديدة مطلوبة', true); return; }
   if (n1 !== n2) { toast('كلمتا المرور غير متطابقتين', true); return; }
-  if (n1.length < 6) { toast('كلمة المرور لازم تكون 6 حروف على الأقل', true); return; }
-  const u = data.users.find(x => x.id === session.id);
-  if (!u) { toast('الحساب غير موجود', true); return; }
-  if (u.password !== oldP) { toast('كلمة المرور الحالية غير صحيحة', true); return; }
-  u.password = n1;
-  if (!saveData(data)) return;
-  toast('تم تحديث كلمة المرور بنجاح');
-  renderSection('account');
+  if (n1.length < 8) { toast('كلمة المرور لازم تكون 8 حروف على الأقل', true); return; }
+  if (!sessionToken()) { toast('انتهت الجلسة - سجّل دخول تاني', true); return; }
+
+  fetch('/api/users', {
+    method: 'PUT',
+    headers: sessionHeaders(),
+    body: JSON.stringify({ users: [{
+      id: session.id, username: session.username, name: session.name,
+      role: session.role, device: session.device, perms: session.perms || {},
+      password: n1,
+    }] }),
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok) {
+        toast('تم تحديث كلمة المرور - تم إنهاء الجلسات الأخرى');
+        endSession();
+        renderLogin();
+      } else {
+        toast('فشل: ' + ((res && res.error) || 'خطأ'), true);
+      }
+    })
+    .catch(() => toast('تعذّر الاتصال بالخادم', true));
 }
 
 /* ===== Modal helpers ===== */
@@ -1632,20 +1631,65 @@ function esc(v) { return (v == null ? '' : String(v)).replace(/&/g,'&amp;').repl
 /* ===== Boot ===== */
 if (session) renderApp(); else renderLogin();
 
+/* ===== Session helpers (server-side) ===== */
+function sessionToken() { return session && session.token ? session.token : ''; }
+function sessionHeaders(extra) {
+  const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+  const t = sessionToken();
+  if (t) h['X-Session'] = t;
+  return h;
+}
+function endSession() {
+  const t = sessionToken();
+  if (t) {
+    fetch('/api/logout', { method: 'POST', headers: { 'X-Session': t } })
+      .catch(() => {});
+  }
+  session = null;
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+function checkSession() {
+  const t = sessionToken();
+  if (!t) { endSession(); renderLogin(); return false; }
+  fetch('/api/session', { headers: { 'X-Session': t } })
+    .then(r => r.json())
+    .then(res => {
+      if (!res || !res.authenticated) {
+        endSession();
+        renderLogin();
+        toast('انتهت الجلسة - سجّل دخول تاني', true);
+      }
+    })
+    .catch(() => {});
+}
+
+/* auto-lock when the tab is hidden for a while */
+let idleTimer = null;
+function resetIdle() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (session) { endSession(); renderLogin(); toast('تم قفل اللوحة بعد عدم النشاط', true); }
+  }, 30 * 60 * 1000);   // 30 minutes
+}
+['mousemove', 'keydown', 'click', 'scroll'].forEach(ev => {
+  document.addEventListener(ev, resetIdle, { passive: true });
+});
+resetIdle();
+
 /* Pull the global content (Cloudflare KV) so the panel shows the
    latest shared data on any device, not just this browser's cache. */
-function pullGlobal() {
+function pullGlobal(silent) {
   if (location.protocol === 'file:') return;
-  const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
-  const authHeaders = { 'Accept': 'application/json', 'X-Edit-Token': token };
+  const t = sessionToken();
 
-  // users (admin only - token protected)
-  const usersPromise = fetch('/api/users', { headers: authHeaders, cache: 'no-store' })
-    .then(r => (r.ok ? r.json() : null))
-    .then(res => (res && res.ok && res.users) ? res.users : null)
-    .catch(() => null);
+  const usersPromise = t
+    ? fetch('/api/users', { headers: { 'X-Session': t }, cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(res => (res && res.ok && res.users) ? res.users : null)
+        .catch(() => null)
+    : Promise.resolve(null);
 
-  // public content
   fetch('/api/data', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
     .then(r => (r.ok ? r.json() : null))
     .then(res => {
@@ -1653,19 +1697,19 @@ function pullGlobal() {
       return usersPromise.then(remoteUsers => {
         const merged = Object.assign({}, res.data);
         if (remoteUsers && remoteUsers.length) {
-          // keep the local plaintext password if we have it, take everything else from the server
-          const localPw = {};
-          (data.users || []).forEach(x => { localPw[x.username] = x.password; });
-          merged.users = remoteUsers.map(u => Object.assign({}, u, {
-            password: localPw[u.username] || u.password || '',
+          merged.users = remoteUsers.map(u => ({
+            id: u.id, username: u.username, name: u.name, role: u.role,
+            device: u.device, perms: u.perms || {},
+            lastDevice: u.last_device || '', lastLogin: u.last_login || '',
+            password: '',            // passwords never leave the server
           }));
         }
-        const remote = JSON.stringify(merged);
-        const local = localStorage.getItem(STORAGE_KEY);
-        if (remote === local) return null;
-        try { localStorage.setItem(STORAGE_KEY, remote); } catch (e) { return null; }
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(merged)); } catch (e) {}
         data = loadData();
-        if (session) { renderApp(); toast('تم تحديث البيانات من السيرفر'); }
+        if (session) {
+          renderApp();
+          if (!silent) toast('تم تحديث البيانات من الخادم');
+        }
         return true;
       });
     })

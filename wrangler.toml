@@ -2,8 +2,13 @@ name = "alalfi-school"
 compatibility_date = "2026-11-10"
 pages_build_output_dir = "."
 
-# Cloudflare KV namespace - global storage for the site content
-# (required for the /api/data Pages Function to work)
+# Cloudflare D1 - the real database (users, sessions, content)
+[[d1_databases]]
+binding = "ALALFI_DB"
+database_name = "alalfi-db"
+database_id = "5b9ee32e-f76b-4aa3-afe1-a9b345ac78fa"
+
+# (KV is kept only as a legacy mirror - the DB is the source of truth)
 [[kv_namespaces]]
 binding = "CONTENT"
 id = "14df389d3ff14aa095c769362d2965cc"

@@ -1,63 +1,86 @@
 """
-Deploy the school website to Cloudflare Pages via the REST API (direct upload).
+Secure deploy for Cloudflare Pages (AlAlfi school website).
+
+- Stages ONLY the public site files into a temp folder (no dev scripts,
+  no .git, no wrangler.toml) so they are never publicly downloadable.
+- Uploads via wrangler pages deploy (with the D1 + KV bindings).
+- Verifies the bindings + publish secret afterwards.
 
 Usage:
-  python deploy_cloudflare.py <ACCOUNT_ID> <API_TOKEN> [PROJECT_NAME]
-
-Create the token at:
-  https://dash.cloudflare.com/profile/api-tokens
-  -> Create Token -> Edit Cloudflare Workers -> Account -> Cloudflare Pages -> Edit
+  python deploy_cloudflare.py <API_TOKEN> [ACCOUNT_ID] [PROJECT]
 """
-import os, sys, json, hashlib, mimetypes, urllib.request, urllib.error, time, mimetypes
+import os, sys, shutil, subprocess, json, urllib.request, urllib.error, tempfile
 
-API = "https://api.cloudflare.com/client/v4"
 ROOT = os.path.dirname(os.path.abspath(__file__))
+API = "https://api.cloudflare.com/client/v4"
+KV_ID = "14df389d3ff14aa095c769362d2965cc"
+D1_ID = "5b9ee32e-f76b-4aa3-afe1-a9b345ac78fa"
+D1_NAME = "alalfi-db"
 
-SKIP_NAMES = {".git", "node_modules", ".wrangler", ".gitignore", ".DS_Store", "Thumbs.db", "desktop.ini"}
-SKIP_EXT = {".log", ".tmp", ".zip"}
-MAX_FILE_BYTES = 25 * 1024 * 1024
-
-
-def api(method, path, token, body=None, content_type=None, raw=False, soft=False):
-    url = API + path
-    data = None
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    if body is not None:
-        data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            payload = r.read()
-            return json.loads(payload) if payload else {}
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")
-        if soft:
-            try:
-                return json.loads(detail)
-            except Exception:
-                return {"success": False, "errors": [{"message": detail[:200]}]}
-        print(f"HTTP {e.code} {method} {path}\n{detail[:800]}")
-        sys.exit(1)
+# files/folders that must NEVER be published
+EXCLUDE_NAMES = {
+    ".git", ".wrangler", "node_modules", "__pycache__", ".vscode", ".idea",
+    ".gitignore", "deploy.bat", "deploy_cloudflare.py", "deploy_github.py",
+    "ensure_cloudflare.py", "make_pptx.py", "seed_db.py", "wrangler.toml",
+    "logo-original.png",
+}
+EXCLUDE_EXT = {".pyc", ".log", ".tmp", ".zip", ".bak"}
 
 
-def collect_files(root):
-    files = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_NAMES]
+def stage():
+    """Return (staging_root, site_dir) containing only publishable files."""
+    root = tempfile.mkdtemp(prefix="alalfi-site-")
+    site = os.path.join(root, "site")
+    os.makedirs(site, exist_ok=True)
+
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_NAMES]
+        rel_dir = os.path.relpath(dirpath, ROOT)
+        if rel_dir == ".":
+            rel_dir = ""
         for fn in filenames:
-            if fn in SKIP_NAMES or fn.startswith("_") and fn.endswith(".html"):
+            if fn in EXCLUDE_NAMES:
                 continue
             ext = os.path.splitext(fn)[1].lower()
-            if ext in SKIP_EXT:
+            if ext in EXCLUDE_EXT:
                 continue
-            full = os.path.join(dirpath, fn)
-            rel = os.path.relpath(full, root).replace("\\", "/")
-            size = os.path.getsize(full)
-            if size > MAX_FILE_BYTES:
-                print(f"  skip (too big) {rel} {size}")
-                continue
-            files.append((rel, full, size))
-    return files
+            src = os.path.join(dirpath, fn)
+            dst = os.path.join(site, rel_dir, fn) if rel_dir else os.path.join(site, fn)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+
+    # Pages Functions live at the PROJECT ROOT (next to wrangler.toml)
+    fn_src = os.path.join(ROOT, "functions")
+    if os.path.isdir(fn_src):
+        shutil.copytree(fn_src, os.path.join(root, "functions"), dirs_exist_ok=True)
+
+    # wrangler config lives OUTSIDE the uploaded folder -> never public
+    with open(os.path.join(root, "wrangler.toml"), "w", encoding="utf-8") as f:
+        f.write(
+            'name = "alalfi-school"\n'
+            'compatibility_date = "2026-11-10"\n'
+            'pages_build_output_dir = "site"\n\n'
+            '[[d1_databases]]\n'
+            'binding = "ALALFI_DB"\n'
+            f'database_name = "{D1_NAME}"\n'
+            f'database_id = "{D1_ID}"\n\n'
+            '[[kv_namespaces]]\n'
+            'binding = "CONTENT"\n'
+            f'id = "{KV_ID}"\n'
+        )
+    return root, site
+
+
+def api(method, path, token, body=None):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(API + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        return {"success": False, "err": e.read().decode("utf-8", "replace")[:200]}
 
 
 def main():
@@ -65,89 +88,36 @@ def main():
         print(__doc__)
         sys.exit(1)
     token = sys.argv[1]
-    project = sys.argv[2] if len(sys.argv) > 2 else "alalfi-school"
+    account = sys.argv[2] if len(sys.argv) > 2 else "78b027e0bbc93bc080113f41d3cd49e8"
+    project = sys.argv[3] if len(sys.argv) > 3 else "alalfi-school"
 
-    # discover account id automatically
-    print("==> discovering Cloudflare account")
-    accs = api("GET", "/accounts?per_page=20", token)
-    if not accs.get("success") or not accs.get("result"):
-        print("Could not list accounts. Check the token permissions.")
-        sys.exit(1)
-    accounts = accs["result"]
-    if len(accounts) == 1:
-        account_id = accounts[0]["id"]
-        print(f"    account: {accounts[0]['name']} ({account_id})")
-    else:
-        for i, a in enumerate(accounts, 1):
-            print(f"    [{i}] {a['name']}  ({a['id']})")
-        pick = input("    choose account number: ").strip()
-        account_id = accounts[int(pick) - 1]["id"]
+    print("==> staging public files (dev scripts excluded)")
+    root, site = stage()
+    n = sum(len(f) for _, _, f in os.walk(site))
+    print(f"    {n} files staged")
 
-    # 1. ensure project exists
-    print(f"==> checking project '{project}'")
-    r = api("GET", f"/accounts/{account_id}/pages/projects/{project}", token, soft=True)
-    if not r.get("success"):
-        print("    creating project...")
-        r = api("POST", f"/accounts/{account_id}/pages/projects", token,
-                {"name": project, "production_branch": "main"})
-        if not r.get("success"):
-            print("FAILED to create project:", json.dumps(r)[:600])
-            sys.exit(1)
-    print("    OK project ready")
+    print("==> deploying to Cloudflare Pages")
+    wrangler = os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "wrangler", "bin", "wrangler.js")
+    env = dict(os.environ, CLOUDFLARE_API_TOKEN=token)
+    p = subprocess.run(
+        f'node "{wrangler}" pages deploy site --project-name {project} --branch main --commit-dirty=true',
+        cwd=root, capture_output=True, text=True, shell=True, env=env,
+        encoding="utf-8", errors="replace")
+    tail = (p.stdout or "").strip().splitlines()
+    print("   ", tail[-1] if tail else (p.stderr or "")[:200])
 
-    files = collect_files(ROOT)
-    total = sum(s for _, _, s in files)
-    print(f"==> uploading {len(files)} files ({total/1024:.0f} KB)")
+    print("==> verifying bindings")
+    r = api("GET", f"/accounts/{account}/pages/projects/{project}", token)
+    cfg = (r.get("result") or {}).get("deployment_configs") or {}
+    prod = cfg.get("production") or {}
+    kv = prod.get("kv_namespaces") or {}
+    d1 = prod.get("d1_databases") or {}
+    print(f"    D1 binding : {'OK' if 'ALALFI_DB' in d1 else 'MISSING'}")
+    print(f"    KV binding : {'OK' if 'CONTENT' in kv else 'MISSING'}")
+    print(f"    secret     : {'present' if 'EDIT_TOKEN' in (prod.get('env_vars') or {}) else 'MISSING'}")
 
-    # 2. build manifest
-    manifest_files = {}
-    for rel, full, size in files:
-        with open(full, "rb") as f:
-            h = hashlib.sha256(f.read()).hexdigest()
-        manifest_files[rel] = {"hash": h}
-    manifest = json.dumps({"files": manifest_files, "redirects": [], "headers": {}})
-
-    # 3. multipart upload
-    boundary = "----alalfi" + hashlib.md5(str(time.time()).encode()).hexdigest()
-    parts = []
-
-    def add_field(name, value):
-        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n".encode() + value.encode() + b"\r\n")
-
-    add_field("manifest", manifest)
-    for rel, full, size in files:
-        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
-        head = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{rel}\"; filename=\"{os.path.basename(rel)}\"\r\n"
-                f"Content-Type: {ctype}\r\n\r\n").encode()
-        with open(full, "rb") as f:
-            parts.append(head + f.read() + b"\r\n")
-    parts.append(f"--{boundary}--\r\n".encode())
-    body = b"".join(parts)
-
-    url = f"{API}/accounts/{account_id}/pages/projects/{project}/deployments"
-    req = urllib.request.Request(url, data=body, method="POST", headers={
-        "Authorization": f"Bearer {token}",
-        "Content-Type": f"multipart/form-data; boundary={boundary}",
-    })
-    print("    uploading...")
-    try:
-        with urllib.request.urlopen(req, timeout=600) as r:
-            res = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        print("HTTP", e.code, e.read().decode("utf-8", "replace")[:800])
-        sys.exit(1)
-
-    if not res.get("success"):
-        print("FAILED:", json.dumps(res)[:600])
-        sys.exit(1)
-
-    d = res["result"]
-    print("\n=== DEPLOYED ===")
-    print("URL:", d.get("url"))
-    print("Deployment:", d.get("id"))
-    for a in (d.get("aliases") or []):
-        print("Alias:", a)
-    print("\nProduction URL: https://" + project + ".pages.dev")
+    shutil.rmtree(root, ignore_errors=True)
+    print(f"\n==> live: https://{project}.pages.dev")
 
 
 if __name__ == "__main__":
