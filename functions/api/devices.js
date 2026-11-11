@@ -2,7 +2,7 @@
  * GET  /api/devices  -> list all devices (superadmin session required)
  * POST /api/devices  -> actions (superadmin session required)
  *        body: { action: 'register', slug, deviceId, deviceInfo }
- *           -> { ok, status: 'active' | 'pending' | 'new', code }
+ *           -> { ok, status: 'active' | 'pending' | 'new' | 'other_account', code }
  *        body: { action: 'approve' | 'reject' | 'unbind', deviceId, userId }
  */
 import { json, corsHeaders, readJson, noDb, requireSession } from './_shared.js';
@@ -45,7 +45,7 @@ export async function onRequestPost(context) {
   const payload = await readJson(request);
   if (!payload) return json({ ok: false, error: 'invalid json' }, 400, request);
 
-  /* ---- register: called by the browser right after the personal link opens ---- */
+  /* ---------------- register (no session needed) ---------------- */
   if (payload.action === 'register') {
     const slug = String(payload.slug || '').trim();
     const deviceId = String(payload.deviceId || '').trim();
@@ -54,14 +54,11 @@ export async function onRequestPost(context) {
 
     try {
       const user = await env.ALALFI_DB.prepare(
-        'SELECT id, username, role FROM users WHERE slug = ? COLLATE NOCASE AND is_active = 1 LIMIT 1'
+        'SELECT id, username, name, role FROM users WHERE slug = ? COLLATE NOCASE AND is_active = 1 LIMIT 1'
       ).bind(slug).first();
       if (!user) return json({ ok: true, status: 'unknown' }, 200, request);
 
-      // the first device of an account binds automatically
-      // (the superadmin can always log in from /admin.html as a fallback)
-
-      // a device can belong to ONE account only
+      /* 1) a device belongs to ONE account only */
       const other = await env.ALALFI_DB.prepare(
         `SELECT u.username, u.name FROM user_devices d JOIN users u ON u.id = d.user_id
           WHERE d.device_id = ? AND d.user_id != ? LIMIT 1`
@@ -73,10 +70,22 @@ export async function onRequestPost(context) {
         }, 200, request);
       }
 
+      /* 2) the recovery key (the publish key) activates this device right away */
+      const recovery = String(request.headers.get('X-Edit-Token') || '');
+      const isRecovery = !!(env.EDIT_TOKEN && recovery && recovery === env.EDIT_TOKEN);
+      if (isRecovery) {
+        await env.ALALFI_DB.prepare(
+          `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
+           VALUES (?, ?, ?, 'active', datetime('now'))
+           ON CONFLICT(user_id, device_id) DO UPDATE SET status='active', device_info=excluded.device_info, last_seen=datetime('now')`
+        ).bind(user.id, deviceId, deviceInfo).run();
+        return json({ ok: true, status: 'active', username: user.username, byRecovery: true }, 200, request);
+      }
+
+      /* 3) already approved? */
       const bound = await env.ALALFI_DB.prepare(
         'SELECT id, status FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1'
       ).bind(user.id, deviceId).first();
-
       if (bound && bound.status === 'active') {
         await env.ALALFI_DB.prepare(
           "UPDATE user_devices SET device_info = ?, last_seen = datetime('now') WHERE id = ?"
@@ -88,8 +97,8 @@ export async function onRequestPost(context) {
         'SELECT COUNT(*) AS c FROM user_devices WHERE user_id = ?'
       ).bind(user.id).first()).c || 0;
 
+      /* 4) already waiting for approval */
       if (bound) {
-        // already pending / rejected -> refresh the info
         await env.ALALFI_DB.prepare(
           "UPDATE user_devices SET device_info = ?, status = CASE WHEN status='rejected' THEN 'pending' ELSE status END WHERE id = ?"
         ).bind(deviceInfo, bound.id).run();
@@ -97,8 +106,7 @@ export async function onRequestPost(context) {
         return json({ ok: true, status: 'pending', code: code, username: user.username }, 200, request);
       }
 
-      // the superadmin owns the account: their FIRST device binds itself
-      // (nobody else could approve it), every further device needs approval
+      /* 5) the superadmin's very first device binds itself (nobody else could approve it) */
       if (user.role === 'superadmin' && total === 0) {
         await env.ALALFI_DB.prepare(
           `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
@@ -108,7 +116,7 @@ export async function onRequestPost(context) {
         return json({ ok: true, status: 'active', username: user.username }, 200, request);
       }
 
-      // EVERY other new device needs the superadmin's approval first
+      /* 6) every other new device needs the superadmin's approval */
       const ins = await env.ALALFI_DB.prepare(
         `INSERT INTO user_devices (user_id, device_id, device_info, status)
          VALUES (?, ?, ?, 'pending')
@@ -116,19 +124,13 @@ export async function onRequestPost(context) {
       ).bind(user.id, deviceId, deviceInfo).run();
       const newId = (ins && ins.meta && ins.meta.last_row_id) || 0;
       const code = (user.id * 1000 + newId) % 100000;
-      return json({
-        ok: true,
-        status: 'new',
-        code: code,
-        first: total === 0,
-        username: user.username,
-      }, 200, request);
+      return json({ ok: true, status: 'new', code: code, first: total === 0, username: user.username }, 200, request);
     } catch (e) {
       return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
     }
   }
 
-  /* ---- everything else needs a superadmin session ---- */
+  /* ---------------- everything else needs a superadmin session ---------------- */
   const auth = await requireSession(env, request);
   if (auth.error) return auth.error;
   if (auth.user.role !== 'superadmin') {

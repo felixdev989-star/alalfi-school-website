@@ -264,15 +264,48 @@ function registerDevice(slug) {
       // pending or brand-new -> block the login and show the request code
       const form = document.querySelector('.login-box');
       if (form) {
-        form.querySelectorAll('.form-group, .btn-gold, p').forEach(el => { el.style.display = 'none'; });
+        // hide the username / password fields, but KEEP the submit button
+        form.querySelectorAll('.form-group').forEach(el => { el.style.display = 'none'; });
+        form.querySelectorAll('p').forEach(el => { el.style.display = 'none'; });
       }
       const recBox = document.getElementById('recoveryBox');
       if (recBox) {
         recBox.style.display = 'block';
         const lbl = recBox.querySelector('label');
-        if (lbl) lbl.textContent = 'رمز الاسترداد (لو انت المدير العام)';
+        if (lbl) lbl.textContent = 'رمز الاسترداد (للجهاز الجديد)';
         const inp = document.getElementById('lk');
-        if (inp) inp.setAttribute('placeholder', 'رمز الاسترداد');
+        if (inp) {
+          inp.setAttribute('placeholder', 'ألصق رمز الاسترداد');
+          inp.value = localStorage.getItem('alalfi_edit_token') || '';
+          setTimeout(() => inp.focus(), 150);
+        }
+      }
+      // the submit button stays visible -> it activates the device
+      const loginBtn = document.querySelector('.login-box .btn-gold');
+      if (loginBtn) {
+        loginBtn.style.display = 'block';
+        loginBtn.textContent = 'تفعيل الجهاز بالرمز';
+        loginBtn.onclick = () => {
+          const lk = document.getElementById('lk');
+          const token = lk ? lk.value.trim() : '';
+          if (!token) { toast('الصق رمز الاسترداد أولاً', true); return; }
+          try { localStorage.setItem('alalfi_edit_token', token); } catch (e) {}
+          fetch('/api/devices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+            body: JSON.stringify({ action: 'register', slug: slug, deviceId: deviceId(), deviceInfo: deviceInfo() }),
+          })
+            .then(r => r.json())
+            .then(res => {
+              if (res && res.ok && res.status === 'active') {
+                toast('تم تفعيل الجهاز - سجّل دخول دلوقتي');
+                setTimeout(() => location.reload(), 700);
+              } else {
+                toast('الرمز غير صحيح', true);
+              }
+            })
+            .catch(() => toast('تعذّر الاتصال بالخادم', true));
+        };
       }
       banner.style.display = 'block';
       banner.style.background = 'rgba(201,162,39,0.14)';
