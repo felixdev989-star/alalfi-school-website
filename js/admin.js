@@ -167,6 +167,20 @@ function personalUrl(slug) {
   const base = location.origin;
   return base + '/u/' + encodeURIComponent(slug || '');
 }
+/* clean a slug: accept a pasted full URL and keep only the last part */
+function cleanSlug(v) {
+  let s = String(v || '').trim();
+  if (s.indexOf('/') >= 0) s = s.split('/').filter(Boolean).pop() || '';
+  s = s.split('?')[0].split('#')[0];
+  s = s.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return s.slice(0, 40);
+}
+/* suggest a slug from the username (latin only) */
+function suggestSlug(username) {
+  const u = String(username || '').trim().toLowerCase();
+  const latin = u.replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return latin;
+}
 function copyText(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -233,6 +247,17 @@ function registerDevice(slug) {
       if (!res || !res.ok) { banner.textContent = 'تعذّر التحقق من الجهاز'; return; }
       if (res.status === 'active') {
         banner.style.display = 'none';
+        return;
+      }
+      if (res.status === 'other_account') {
+        const form = document.querySelector('.login-box');
+        if (form) form.querySelectorAll('.form-group, .btn-gold, p').forEach(el => { el.style.display = 'none'; });
+        banner.style.display = 'block';
+        banner.style.background = 'rgba(242,160,160,0.12)';
+        banner.style.border = '1px solid rgba(242,160,160,0.5)';
+        banner.innerHTML = '<div style="font-size:15px;font-weight:800;margin-bottom:8px;">🔒 ' + esc(res.message || 'هذا الجهاز مرتبط بحساب آخر') + '</div>'
+          + '<div style="font-size:12px;opacity:.9;line-height:1.8;">كل جهاز مرتبط بحساب واحد بس.<br>'
+          + 'لو انت المشرف العام، افتح رابطك الشخصي: <span style="color:#f0d68a">/u/admin</span></div>';
         return;
       }
       // pending or brand-new -> block the login and show the request code
@@ -1324,9 +1349,9 @@ function userForm(u) {
   return `
     <h3>${u ? 'تعديل مستخدم' : 'مستخدم جديد'}</h3>
     <div class="form-grid">
-      <div class="form-group"><label>اسم المستخدم</label><input id="f_username" value="${esc(u?.username)}"></div>
+      <div class="form-group"><label>اسم المستخدم</label><input id="f_username" value="${esc(u?.username)}" ${u ? '' : 'oninput="autoSlug()"'}></div>
       <div class="form-group"><label>الاسم</label><input id="f_name" value="${esc(u?.name)}"></div>
-      <div class="form-group"><label>الرابط الشخصي (slug)</label><input id="f_slug" value="${esc(u?.slug || '')}" placeholder="ahmed" oninput="previewSlug(this.value)">
+      <div class="form-group"><label>الرابط الشخصي (slug)</label><input id="f_slug" value="${esc(u?.slug || '')}" placeholder="ahmed" oninput="previewSlug(this.value)" onblur="fixSlugField()">
         <small style="font-size:11px;color:var(--ad-muted);">الرابط: <span id="slugPreview">${esc(personalUrl(u?.slug || 'ahmed'))}</span></small>
       </div>
       <div class="form-group"><label>الجهاز / الجهاز المخصص</label><input id="f_device" value="${esc(u?.device || '')}" placeholder="مثال: مكتب 1 - الدور الثالث"></div>
@@ -1381,9 +1406,11 @@ function saveUser(id) {
 
   const deviceField = document.getElementById('f_device');
   const slugField = document.getElementById('f_slug');
+  let slugVal = slugField ? cleanSlug(slugField.value) : '';
+  if (!slugVal) slugVal = suggestSlug(username);
   const obj = {
     username,
-    slug: slugField ? slugField.value.trim() : '',
+    slug: slugVal,
     name: document.getElementById('f_name').value.trim(),
     role,
     perms,
@@ -1564,7 +1591,21 @@ function changeMyPassword() {
 /* ===== Devices manager (per user) ===== */
 function previewSlug(v) {
   const el = document.getElementById('slugPreview');
-  if (el) el.textContent = personalUrl(v.trim() || 'ahmed');
+  if (el) el.textContent = personalUrl(cleanSlug(v) || 'ahmed');
+}
+function autoSlug() {
+  const f = document.getElementById('f_slug');
+  if (!f) return;
+  const u = document.getElementById('f_username');
+  const sug = suggestSlug(u ? u.value : '');
+  if (sug && !f.value) { f.value = sug; previewSlug(sug); }
+}
+function fixSlugField() {
+  const f = document.getElementById('f_slug');
+  if (!f) return;
+  const clean = cleanSlug(f.value);
+  if (clean !== f.value.trim()) f.value = clean;
+  previewSlug(clean);
 }
 function openDevices(userId) {
   const u = data.users.find(x => x.id === userId);

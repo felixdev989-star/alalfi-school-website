@@ -61,6 +61,18 @@ export async function onRequestPost(context) {
       // the first device of an account binds automatically
       // (the superadmin can always log in from /admin.html as a fallback)
 
+      // a device can belong to ONE account only
+      const other = await env.ALALFI_DB.prepare(
+        `SELECT u.username, u.name FROM user_devices d JOIN users u ON u.id = d.user_id
+          WHERE d.device_id = ? AND d.user_id != ? LIMIT 1`
+      ).bind(deviceId, user.id).first();
+      if (other) {
+        return json({
+          ok: true, status: 'other_account',
+          message: 'هذا الجهاز مرتبط بحساب آخر (' + (other.name || other.username) + ')',
+        }, 200, request);
+      }
+
       const bound = await env.ALALFI_DB.prepare(
         'SELECT id, status FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1'
       ).bind(user.id, deviceId).first();
