@@ -209,11 +209,11 @@ function renderLogin() {
         <h1>لوحة التحكم</h1>
         <p>مدرسة الالفي الثانوية المشتركة</p>
         ${hint ? '<div class="login-hint">' + hint + '</div>' : ''}
-        <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="${esc(pre)}"${pre ? ' readonly' : ''}></div>
+        <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="${esc(pre || 'admin')}"${pre ? ' readonly' : ''} autocomplete="username"></div>
         <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password" autocomplete="current-password"></div>
         <div class="form-group" id="recoveryBox" style="display:none;"><label>رمز الاسترداد (للجهاز الجديد)</label><input id="lk" type="password" placeholder="رمز الاسترداد" autocomplete="off"></div>
         <button class="btn btn-gold" style="width:100%;padding:12px;margin-top:8px;" onclick="doLogin()">تسجيل الدخول</button>
-        ${pre ? '' : '<p style="margin-top:14px;font-size:11px;color:#8fa0b8;">الدخول يتم التحقق منه على الخادم - الحسابات يديرها المدير العام فقط</p>'}
+        ${pre ? '' : '<p style="margin-top:14px;font-size:11px;color:#8fa0b8;line-height:1.9;">الدخول يتم التحقق منه على الخادم - الحسابات يديرها المدير العام فقط.<br>لو نسيت كلمة المرور، استخدم <b style="color:#f0d68a">رمز الاسترداد</b> في نفس الصفحة.</p>'}
       </div>
     </div>`;
   if (pre) setTimeout(() => { const lp = document.getElementById('lp'); if (lp) lp.focus(); }, 120);
