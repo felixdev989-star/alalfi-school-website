@@ -346,6 +346,11 @@ body.sidebar-open { overflow: hidden; }
   }
   .menu-toggle:hover { background: var(--ad-gold); color: var(--ad-sidebar); }
   .topbar .left { padding-inline-start: 52px; }
+  /* modals must be usable on small screens */
+  .modal-backdrop { padding: 12px; align-items: flex-start; }
+  .modal { max-height: 92vh; padding: 20px 16px; border-radius: 14px; }
+  .modal .footer { position: sticky; bottom: -20px; background: var(--ad-card); padding: 12px 0 4px; margin-bottom: -4px; }
+  .modal .footer .btn { flex: 1; }
   .form-grid { grid-template-columns: 1fr; }
   .topbar .search-box input { width: 150px; }
   .content { padding: 16px; }

@@ -26,9 +26,9 @@ const defaultData = () => ({
     primaryColor: '#1b3f7a',
     accentColor: '#c9a227',
     images: {
-      hero: 'images/hero.jpg',
-      about: 'images/campus.jpg',
-      pageAbout: 'images/campus.jpg',
+      hero: 'images/school-photo-1.jpg',
+      about: 'images/school-photo-2.jpg',
+      pageAbout: 'images/school-photo-2.jpg',
       pagePrograms: 'images/classroom.jpg',
       pageNews: 'images/library.jpg',
       pageGallery: 'images/teacher.jpg',
@@ -63,7 +63,7 @@ const defaultData = () => ({
     { id: 5, title: 'مسار آداب وفنون', age: 'مسار 4', desc: 'صف 2: اختيار (علم نفس أو لغة ثانية) + 3 مواد عامة. ص 3: جغرافيا (متقدم) + إحصاء + تربية دينية (70%).', img: 'images/students.jpg' },
   ],
   gallery: [
-    'images/school-photo-1.png', 'images/school-photo-2.png', 'images/school-fb-1.jpg',
+    'images/school-photo-1.jpg', 'images/school-photo-2.jpg', 'images/school-fb-1.jpg',
     'images/campus.jpg', 'images/students.jpg', 'images/classroom.jpg', 'images/library.jpg',
     'images/teacher.jpg', 'images/hero.jpg',
   ],
@@ -1461,6 +1461,18 @@ function openModal(html) {
 function closeModal() { document.getElementById('modalBackdrop').classList.remove('show'); }
 document.addEventListener('click', e => {
   if (e.target.id === 'modalBackdrop') closeModal();
+  if (e.target.id === 'cropBackdrop') closeCropper();
+  if (e.target.id === 'sidebarBackdrop') closeSidebar();
+});
+/* ESC closes whatever is open */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const mb = document.getElementById('modalBackdrop');
+  const cb = document.getElementById('cropBackdrop');
+  const sb = document.getElementById('sidebar');
+  if (mb && mb.classList.contains('show')) { closeModal(); return; }
+  if (cb && cb.classList.contains('show')) { closeCropper(); return; }
+  if (sb && sb.classList.contains('open')) { closeSidebar(); return; }
 });
 
 /* ===== Export / Import / Reset ===== */
