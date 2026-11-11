@@ -97,7 +97,18 @@ export async function onRequestPost(context) {
         return json({ ok: true, status: 'pending', code: code, username: user.username }, 200, request);
       }
 
-      // EVERY new device needs the superadmin's approval first
+      // the superadmin owns the account: their FIRST device binds itself
+      // (nobody else could approve it), every further device needs approval
+      if (user.role === 'superadmin' && total === 0) {
+        await env.ALALFI_DB.prepare(
+          `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
+           VALUES (?, ?, ?, 'active', datetime('now'))
+           ON CONFLICT(user_id, device_id) DO UPDATE SET status='active', device_info=excluded.device_info, last_seen=datetime('now')`
+        ).bind(user.id, deviceId, deviceInfo).run();
+        return json({ ok: true, status: 'active', username: user.username }, 200, request);
+      }
+
+      // EVERY other new device needs the superadmin's approval first
       const ins = await env.ALALFI_DB.prepare(
         `INSERT INTO user_devices (user_id, device_id, device_info, status)
          VALUES (?, ?, ?, 'pending')

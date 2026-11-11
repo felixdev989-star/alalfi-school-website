@@ -83,7 +83,10 @@ export async function onRequestPost(context) {
         }, 403, request);
       }
       if (!bound) {
-        if (!isRecovery) {
+        const total = (await env.ALALFI_DB.prepare(
+          'SELECT COUNT(*) AS c FROM user_devices WHERE user_id = ?'
+        ).bind(user.id).first()).c || 0;
+        if (!isRecovery && !(user.role === 'superadmin' && total === 0)) {
           // unknown device -> needs approval first
           await env.ALALFI_DB.prepare(
             `INSERT INTO user_devices (user_id, device_id, device_info, status)
@@ -96,7 +99,7 @@ export async function onRequestPost(context) {
             recoveryAllowed: !!env.EDIT_TOKEN,
           }, 403, request);
         }
-        // recovery key -> bind this device right away
+        // recovery key (or the superadmin's first device) -> bind right away
         await env.ALALFI_DB.prepare(
           `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
            VALUES (?, ?, ?, 'active', datetime('now'))
