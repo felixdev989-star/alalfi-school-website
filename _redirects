@@ -1,0 +1,9 @@
+# Block development / tooling files from being served publicly.
+/deploy.bat               /  302
+/deploy_cloudflare.py     /  302
+/deploy_github.py         /  302
+/ensure_cloudflare.py     /  302
+/make_pptx.py             /  302
+/wrangler.toml            /  302
+/.gitignore               /  302
+/logo-original.png        /  302

@@ -103,17 +103,36 @@ function syncGlobal(d, silent) {
     clearTimeout(_syncTimer);
     _syncTimer = setTimeout(() => {
       const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
+      const headers = { 'Content-Type': 'application/json', 'X-Edit-Token': token };
+
+      // users are stored separately (and hashed server-side) - never in the public blob
+      const users = d.users || [];
+      const content = Object.assign({}, d);
+      delete content.users;
+
       fetch('/api/data', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
-        body: JSON.stringify({ data: d }),
+        headers: headers,
+        body: JSON.stringify({ data: content }),
       })
         .then(r => r.json())
         .then(res => {
-          if (res && res.ok) {
+          if (!res || !res.ok) {
+            if (!silent) toast('تم الحفظ محلياً — تعذّر النشر العام: ' + ((res && res.error) || 'خطأ'), true);
+            return null;
+          }
+          return fetch('/api/users', {
+            method: 'PUT',
+            headers: headers,
+            body: JSON.stringify({ users: users }),
+          }).then(r2 => r2.json());
+        })
+        .then(res2 => {
+          if (res2 === null) return;
+          if (res2 && res2.ok) {
             if (!silent) toast('تم الحفظ والنشر للجميع');
           } else {
-            toast('تم الحفظ محلياً — تعذّر النشر العام: ' + ((res && res.error) || 'خطأ'), true);
+            if (!silent) toast('تم نشر المحتوى — تعذّر حفظ المستخدمين: ' + ((res2 && res2.error) || ''), true);
           }
         })
         .catch(() => {
@@ -214,19 +233,55 @@ function detectDevice() {
 function doLogin() {
   const u = document.getElementById('lu').value.trim();
   const p = document.getElementById('lp').value;
-  const user = data.users.find(x => x.username === u && x.password === p);
-  if (!user) { toast('اسم المستخدم أو كلمة المرور غير صحيحة', true); return; }
+
+  // 1) local check (this browser)
+  const local = data.users.find(x => x.username === u && x.password === p);
+  if (local) {
+    finishLogin(local);
+    return;
+  }
+
+  // 2) server check (any device) - the server stores only a hash
+  fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u, password: p, device: detectDevice() }),
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.ok && res.user) {
+        const su = res.user;
+        const existing = data.users.find(x => (x.username || '').toLowerCase() === u.toLowerCase());
+        const rec = existing || {
+          id: su.id || uid(data.users),
+          username: su.username,
+          name: su.name || '',
+          role: su.role || 'admin',
+          perms: su.perms || {},
+          device: su.device || '',
+        };
+        rec.password = p;                       // keep locally for next time
+        rec.lastDevice = su.lastDevice || detectDevice();
+        rec.lastLogin = su.lastLogin || new Date().toISOString();
+        if (!existing) data.users.push(rec);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+        finishLogin(rec);
+      } else {
+        toast('اسم المستخدم أو كلمة المرور غير صحيحة', true);
+      }
+    })
+    .catch(() => toast('اسم المستخدم أو كلمة المرور غير صحيحة', true));
+}
+
+function finishLogin(user) {
   session = { id: user.id, username: user.username, name: user.name, role: user.role, device: user.device || '' };
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-
-  // record device + last login
   try {
     user.lastDevice = detectDevice();
     user.lastLogin = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     syncGlobal(data, true);
   } catch (e) { /* ignore */ }
-
   renderApp();
 }
 function doLogout() {
@@ -1581,16 +1636,38 @@ if (session) renderApp(); else renderLogin();
    latest shared data on any device, not just this browser's cache. */
 function pullGlobal() {
   if (location.protocol === 'file:') return;
+  const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
+  const authHeaders = { 'Accept': 'application/json', 'X-Edit-Token': token };
+
+  // users (admin only - token protected)
+  const usersPromise = fetch('/api/users', { headers: authHeaders, cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(res => (res && res.ok && res.users) ? res.users : null)
+    .catch(() => null);
+
+  // public content
   fetch('/api/data', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
     .then(r => (r.ok ? r.json() : null))
     .then(res => {
-      if (!res || !res.ok || !res.data) return;
-      const remote = JSON.stringify(res.data);
-      const local = localStorage.getItem(STORAGE_KEY);
-      if (remote === local) return;
-      try { localStorage.setItem(STORAGE_KEY, remote); } catch (e) { return; }
-      data = loadData();
-      if (session) { renderApp(); toast('تم تحديث البيانات من السيرفر'); }
+      if (!res || !res.ok || !res.data) return null;
+      return usersPromise.then(remoteUsers => {
+        const merged = Object.assign({}, res.data);
+        if (remoteUsers && remoteUsers.length) {
+          // keep the local plaintext password if we have it, take everything else from the server
+          const localPw = {};
+          (data.users || []).forEach(x => { localPw[x.username] = x.password; });
+          merged.users = remoteUsers.map(u => Object.assign({}, u, {
+            password: localPw[u.username] || u.password || '',
+          }));
+        }
+        const remote = JSON.stringify(merged);
+        const local = localStorage.getItem(STORAGE_KEY);
+        if (remote === local) return null;
+        try { localStorage.setItem(STORAGE_KEY, remote); } catch (e) { return null; }
+        data = loadData();
+        if (session) { renderApp(); toast('تم تحديث البيانات من السيرفر'); }
+        return true;
+      });
     })
     .catch(() => {});
 }
