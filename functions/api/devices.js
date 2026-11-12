@@ -13,7 +13,7 @@
  */
 import {
   json, corsHeaders, readJson, noDb, requireSession,
-  limitHit, limitAdd, serverError,
+  limitHit, limitAdd, serverError, requirePanelKey,
 } from './_shared.js';
 
 export async function onRequestOptions(context) {
@@ -33,6 +33,9 @@ export async function onRequestGet(context) {
   const { request, env } = context;
   const missing = noDb(env, request);
   if (missing) return missing;
+
+  const noKey = requirePanelKey(request, env);
+  if (noKey) return noKey;
 
   const auth = await requireSession(env, request);
   if (auth.error) return auth.error;
@@ -163,6 +166,9 @@ export async function onRequestPost(context) {
   }
 
   /* ---------------- everything else needs a superadmin session ---------------- */
+  const noKey = requirePanelKey(request, env);
+  if (noKey) return noKey;
+
   const auth = await requireSession(env, request);
   if (auth.error) return auth.error;
   if (auth.user.role !== 'superadmin') {

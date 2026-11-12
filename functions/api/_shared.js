@@ -168,6 +168,22 @@ export async function limitClear(env, key) {
   } catch (e) { /* ignore */ }
 }
 
+/* ---------------- panel key ----------------
+   The admin panel is protected by a secret key (PANEL_KEY).
+   The page itself is behind a cookie gate; every API call must also
+   carry the key in the X-Panel-Key header. */
+
+export function panelKeyOk(request, env) {
+  if (!env.PANEL_KEY) return true;              // not configured -> open
+  const given = request.headers.get('X-Panel-Key') || '';
+  return timingSafeEqual(given, env.PANEL_KEY);
+}
+
+export function requirePanelKey(request, env) {
+  if (panelKeyOk(request, env)) return null;
+  return json({ ok: false, error: 'panel_key_required' }, 403, request);
+}
+
 /* ---------------- request helpers ---------------- */
 
 export async function readJson(request) {

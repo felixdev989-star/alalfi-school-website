@@ -157,6 +157,15 @@ function toast(msg, err) {
   toast._t = setTimeout(() => t.classList.remove('show'), 2800);
 }
 
+/* The panel lives in /panel/ - a relative image path would look for
+   /panel/images/... , so every path is made absolute here. */
+function imgUrl(p) {
+  const s = String(p == null ? '' : p).trim();
+  if (!s) return '';
+  if (/^(https?:|data:|blob:|\/)/i.test(s)) return s;
+  return '/' + s.replace(/^\.?\//, '');
+}
+
 /* ===== Login ===== */
 function userLoginUrl(username) {
   const base = location.origin + location.pathname;
@@ -211,7 +220,7 @@ function renderLogin() {
   document.getElementById('app').innerHTML = `
     <div class="login-screen">
       <div class="login-box">
-        <img src="images/logo.svg" alt="" style="width:70px;height:70px;margin:0 auto 12px;display:block;">
+        <img src="/images/logo.svg" alt="" style="width:70px;height:70px;margin:0 auto 12px;display:block;">
         <h1>لوحة التحكم</h1>
         <p>مدرسة الالفي الثانوية المشتركة</p>
         ${hint ? '<div class="login-hint">' + hint + '</div>' : ''}
@@ -241,7 +250,7 @@ function registerDevice(slug) {
 
   fetch('/api/devices', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: panelHeaders(),
     body: JSON.stringify({
       action: 'register',
       slug: slug,
@@ -298,7 +307,7 @@ function registerDevice(slug) {
           try { localStorage.setItem('alalfi_edit_token', token); } catch (e) {}
           fetch('/api/devices', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+            headers: panelHeaders({ 'X-Edit-Token': token }),
             body: JSON.stringify({ action: 'register', slug: slug, deviceId: deviceId(), deviceInfo: deviceInfo() }),
           })
             .then(r => r.json())
@@ -393,7 +402,7 @@ function doLogin() {
 
   fetch('/api/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: panelHeaders(),
     body: JSON.stringify({
       username: u, password: p,
       device: detectDevice(),
@@ -406,6 +415,10 @@ function doLogin() {
     .then(res => {
       if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول'; }
       if (!res || !res.ok) {
+        if (panelKeyMissing(res)) {
+          toast('مفتاح اللوحة غير صحيح - هنتقل لصفحة الدخول', true);
+          return;
+        }
         if (res && res.error === 'device_pending') {
           const box = document.getElementById('recoveryBox');
           if (box) box.style.display = 'block';
@@ -518,7 +531,7 @@ function renderApp() {
       <aside class="sidebar" id="sidebar">
         <button class="sidebar-close" id="sidebarClose" onclick="closeSidebar()" aria-label="إغلاق القائمة">✕</button>
         <div class="brand">
-          <img src="images/logo.svg" alt="">
+          <img src="/images/logo.svg" alt="">
           <div><h1>لوحة التحكم</h1><small>${data.settings.siteName}</small></div>
         </div>
         <nav>
@@ -923,7 +936,7 @@ function newsRows(list) {
   return list.map(n => `<tr>
     <td>${n.title}</td>
     <td>${n.date}</td>
-    <td><img src="${n.img}" style="width:40px;height:26px;object-fit:cover;border-radius:4px;" onerror="this.style.display='none'"></td>
+    <td><img src="${imgUrl(n.img)}" style="width:40px;height:26px;object-fit:cover;border-radius:4px;" onerror="this.style.display='none'"></td>
     <td>
       <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;" onclick="editNews(${n.id})">تعديل</button>
       <button class="btn btn-danger" style="padding:4px 8px;font-size:11px;" onclick="deleteNews(${n.id})">حذف</button>
@@ -1063,7 +1076,7 @@ function renderPrograms(c) {
 function programRows(list) {
   return list.map(p => `<tr>
     <td>${p.title}</td><td>${p.age}</td>
-    <td><img src="${p.img}" style="width:40px;height:26px;object-fit:cover;border-radius:4px;" onerror="this.style.display='none'"></td>
+    <td><img src="${imgUrl(p.img)}" style="width:40px;height:26px;object-fit:cover;border-radius:4px;" onerror="this.style.display='none'"></td>
     <td>
       <button class="btn btn-outline-ad" style="padding:4px 8px;font-size:11px;" onclick="editProgram(${p.id})">تعديل</button>
       <button class="btn btn-danger" style="padding:4px 8px;font-size:11px;" onclick="deleteProgram(${p.id})">حذف</button>
@@ -1125,8 +1138,8 @@ function renderGallery(c) {
         return `
         <div class="card gal-card" style="padding:8px;">
           ${type === 'video'
-            ? `<video src="${esc(src)}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" muted></video>`
-            : `<img src="${esc(src)}" alt="${esc(name)}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" onerror="this.style.background='#eee'">`}
+            ? `<video src="${esc(imgUrl(src))}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" muted></video>`
+            : `<img src="${esc(imgUrl(src))}" alt="${esc(name)}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" onerror="this.style.background='#eee'">`}
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;">
             <span title="${esc(src)}" style="font-size:11px;color:var(--ad-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;">${esc(name)}</span>
             <button class="btn btn-danger gal-del" onclick="deleteGallery(${i})">حذف</button>
@@ -1418,7 +1431,7 @@ function renderMedia(c) {
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">
       ${data.media.map((m,i) => `
         <div class="card" style="padding:8px;">
-          ${m.type && m.type.startsWith('video/') ? `<video src="${m.data}" style="width:100%;height:110px;object-fit:cover;border-radius:6px;" muted></video>` : `<img src="${m.data}" style="width:100%;height:110px;object-fit:cover;border-radius:6px;">`}
+          ${m.type && m.type.startsWith('video/') ? `<video src="${imgUrl(m.data)}" style="width:100%;height:110px;object-fit:cover;border-radius:6px;" muted></video>` : `<img src="${imgUrl(m.data)}" style="width:100%;height:110px;object-fit:cover;border-radius:6px;">`}
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
             <span style="font-size:10px;color:var(--ad-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">${m.name}</span>
             <button class="btn btn-danger" style="padding:2px 6px;font-size:10px;" onclick="deleteMedia(${i})">حذف</button>
@@ -2078,7 +2091,32 @@ function sessionHeaders(extra) {
   const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
   const t = sessionToken();
   if (t) h['X-Session'] = t;
+  // the panel key - the server refuses every call without it
+  try {
+    const k = localStorage.getItem('alalfi_panel_key') || '';
+    if (k) h['X-Panel-Key'] = k;
+  } catch (e) { /* ignore */ }
   return h;
+}
+
+/* any request that needs the panel key (even before the session exists) */
+function panelHeaders(extra) {
+  const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+  try {
+    const k = localStorage.getItem('alalfi_panel_key') || '';
+    if (k) h['X-Panel-Key'] = k;
+  } catch (e) { /* ignore */ }
+  return h;
+}
+
+/* the key is wrong or missing -> send the user back to the gate */
+function panelKeyMissing(res) {
+  if (res && res.error === 'panel_key_required') {
+    try { localStorage.removeItem('alalfi_panel_key'); } catch (e) { /* ignore */ }
+    setTimeout(() => { location.href = '/panel/'; }, 600);
+    return true;
+  }
+  return false;
 }
 function endSession() {
   const t = sessionToken();
@@ -2125,9 +2163,12 @@ function pullGlobal(silent) {
   const t = sessionToken();
 
   const usersPromise = t
-    ? fetch('/api/users', { headers: { 'X-Session': t }, cache: 'no-store' })
+    ? fetch('/api/users', { headers: sessionHeaders(), cache: 'no-store' })
         .then(r => (r.ok ? r.json() : null))
-        .then(res => (res && res.ok && res.users) ? res.users : null)
+        .then(res => {
+          if (res && !res.ok && panelKeyMissing(res)) return null;
+          return (res && res.ok && res.users) ? res.users : null;
+        })
         .catch(() => null)
     : Promise.resolve(null);
 

@@ -8,6 +8,7 @@
  */
 import {
   json, corsHeaders, readJson, noDb, requireSession, CONTENT_KEYS, safeJson, serverError,
+  requirePanelKey,
 } from './_shared.js';
 
 export async function onRequestOptions(context) {
@@ -37,6 +38,9 @@ export async function onRequestPut(context) {
   const { request, env } = context;
   const missing = noDb(env, request);
   if (missing) return missing;
+
+  const noKey = requirePanelKey(request, env);
+  if (noKey) return noKey;
 
   const auth = await requireSession(env, request);
   if (auth.error) return auth.error;
@@ -83,6 +87,9 @@ export async function onRequestDelete(context) {
   const { request, env } = context;
   const missing = noDb(env, request);
   if (missing) return missing;
+
+  const noKey = requirePanelKey(request, env);
+  if (noKey) return noKey;
 
   const auth = await requireSession(env, request);
   if (auth.error) return auth.error;

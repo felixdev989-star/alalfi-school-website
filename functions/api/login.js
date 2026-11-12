@@ -15,7 +15,7 @@
 import {
   json, corsHeaders, readJson, noDb, verifyPassword, randomToken, sessionHash,
   SESSION_HOURS, publicUser, getSessionUser,
-  limitHit, limitAdd, limitClear, serverError,
+  limitHit, limitAdd, limitClear, serverError, requirePanelKey,
 } from './_shared.js';
 
 export async function onRequestOptions(context) {
@@ -62,6 +62,10 @@ export async function onRequestPost(context) {
 
   /* ---------- login ---------- */
   if (!path.endsWith('/login')) return json({ ok: false, error: 'not found' }, 404, request);
+
+  /* the panel key is mandatory - without it nobody can even try to log in */
+  const noKey = requirePanelKey(request, env);
+  if (noKey) return noKey;
 
   const payload = await readJson(request);
   if (!payload || !payload.username || !payload.password) {

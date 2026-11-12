@@ -1,3 +1,10 @@
+# The admin panel is not a normal page any more - it lives behind a secret key
+# at /panel/ . The old direct path only leads to the gate.
+/admin.html         /panel/  302
+/admin              /panel/  302
+/admin.htm          /panel/  302
+/panel/index.html   /panel/  302
+
 # Block development / tooling files from being served publicly.
 /deploy.bat               /  302
 /deploy_cloudflare.py     /  302

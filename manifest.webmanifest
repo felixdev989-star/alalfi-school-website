@@ -1,0 +1,49 @@
+{
+  "name": "مدرسة الالفي الثانوية المشتركة",
+  "short_name": "مدرسة الالفي",
+  "description": "إدارة منيا القمح التعليمية - أخبار المدرسة وفعالياتها وبرامجها",
+  "lang": "ar",
+  "dir": "rtl",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "categories": ["education"],
+  "icons": [
+    {
+      "src": "/images/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "الأخبار",
+      "short_name": "الأخبار",
+      "url": "/news.html",
+      "icons": [{ "src": "/images/logo.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "البرامج",
+      "short_name": "البرامج",
+      "url": "/programs.html",
+      "icons": [{ "src": "/images/logo.png", "sizes": "512x512", "type": "image/png" }]
+    }
+  ]
+}

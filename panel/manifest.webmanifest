@@ -1,0 +1,35 @@
+{
+  "name": "لوحة تحكم مدرسة الالفي",
+  "short_name": "لوحة التحكم",
+  "description": "لوحة إدارة محتوى مدرسة الالفي الثانوية المشتركة - إدارة منيا القمح التعليمية",
+  "lang": "ar",
+  "dir": "rtl",
+  "id": "/panel/",
+  "start_url": "/panel/",
+  "scope": "/panel/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/images/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
