@@ -189,6 +189,14 @@ def main():
     print("   ", tail[-1] if tail else (p.stderr or "")[:200])
     shutil.rmtree(proot, ignore_errors=True)
     print(f"==> panel: https://{PANEL_PROJECT}.pages.dev/panel/")
+    # the panel project needs the same bindings + secrets
+    r = api("GET", f"/accounts/{account}/pages/projects/{PANEL_PROJECT}", token)
+    pcfg = ((r.get("result") or {}).get("deployment_configs") or {}).get("production") or {}
+    penv = pcfg.get("env_vars") or {}
+    print("    panel D1 binding :", "OK" if "ALALFI_DB" in (pcfg.get("d1_databases") or {}) else "MISSING")
+    print("    panel KV binding :", "OK" if "CONTENT" in (pcfg.get("kv_namespaces") or {}) else "MISSING")
+    print("    panel secrets    :", "OK" if ("EDIT_TOKEN" in penv and "PANEL_KEY" in penv) else "MISSING")
+
 
 
 
