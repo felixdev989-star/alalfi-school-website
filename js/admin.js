@@ -1653,9 +1653,11 @@ function changeMyPassword() {
   const oldP = document.getElementById('cp_old').value;
   const n1 = document.getElementById('cp_new').value;
   const n2 = document.getElementById('cp_new2').value;
+  if (!oldP) { toast('كلمة المرور الحالية مطلوبة', true); return; }
   if (!n1) { toast('كلمة المرور الجديدة مطلوبة', true); return; }
   if (n1 !== n2) { toast('كلمتا المرور غير متطابقتين', true); return; }
   if (n1.length < 8) { toast('كلمة المرور لازم تكون 8 حروف على الأقل', true); return; }
+  if (n1.toLowerCase() === (session.username || '').toLowerCase()) { toast('كلمة المرور ماتكونش زي اسم المستخدم', true); return; }
   if (!sessionToken()) { toast('انتهت الجلسة - سجّل دخول تاني', true); return; }
 
   fetch('/api/users', {
@@ -1665,6 +1667,7 @@ function changeMyPassword() {
       id: session.id, username: session.username, name: session.name,
       role: session.role, device: session.device, perms: session.perms || {},
       password: n1,
+      old_password: oldP,
     }] }),
   })
     .then(r => r.json())

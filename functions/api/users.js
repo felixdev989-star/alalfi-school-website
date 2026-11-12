@@ -9,8 +9,8 @@
  * Editing a user keeps the SAME id and the SAME personal link.
  */
 import {
-  json, corsHeaders, readJson, noDb, requireSession, hashPassword, randomToken,
-  safeJson, serverError,
+  json, corsHeaders, readJson, noDb, requireSession, hashPassword, verifyPassword,
+  randomToken, safeJson, serverError,
 } from './_shared.js';
 
 export async function onRequestOptions(context) {
@@ -83,16 +83,21 @@ export async function onRequestPut(context) {
       let existing = null;
       const wantedId = parseInt(u.id || 0, 10);
       if (wantedId > 0) {
-        existing = await env.ALALFI_DB.prepare('SELECT id, slug, username FROM users WHERE id = ?')
+        existing = await env.ALALFI_DB.prepare('SELECT id, slug, username, role, name, device, perms, password_hash, salt FROM users WHERE id = ?')
           .bind(wantedId).first();
       }
       if (!existing) {
-        existing = await env.ALALFI_DB.prepare('SELECT id, slug, username FROM users WHERE username = ? COLLATE NOCASE')
+        existing = await env.ALALFI_DB.prepare('SELECT id, slug, username, role, name, device, perms, password_hash, salt FROM users WHERE username = ? COLLATE NOCASE')
           .bind(username).first();
       }
 
-      const perms = JSON.stringify(u.perms || {});
-      const role = u.role === 'superadmin' ? 'superadmin' : 'admin';
+      /* a partial update must NEVER clear a field that was not sent */
+      const perms = JSON.stringify(u.perms !== undefined && u.perms !== null ? u.perms : (safeJson(existing ? existing.perms : null, {}) || {}));
+      const role = (u.role === 'superadmin' || u.role === 'admin')
+        ? u.role
+        : (existing ? existing.role : 'admin');        // no role sent -> keep the old one
+      const displayName = (u.name !== undefined && u.name !== null) ? u.name : (existing ? existing.name : '');
+      const deviceName = (u.device !== undefined && u.device !== null) ? u.device : (existing ? existing.device : '');
 
       /* the personal link stays the same unless the superadmin typed a new one */
       let slug = String(u.slug || '').trim().toLowerCase()
@@ -131,14 +136,42 @@ export async function onRequestPut(context) {
       }
 
       if (existing) {
+        /* ---- validate FIRST, then write (no partial updates) ---- */
+        let newPassword = null;
+        if (u.password) {
+          const pw = String(u.password);
+          /* changing YOUR OWN password needs the current one */
+          if (existing.id === auth.user.id) {
+            const oldPw = String(u.old_password || '');
+            if (!oldPw) {
+              return json({
+                ok: false,
+                error: 'لتغيير كلمة مرورك استخدم قسم «حسابي» وحط كلمة المرور الحالية',
+              }, 400, request);
+            }
+            const check = await verifyPassword(oldPw, existing.password_hash, existing.salt);
+            if (!check.ok) {
+              return json({ ok: false, error: 'كلمة المرور الحالية غلط' }, 403, request);
+            }
+          }
+          /* password policy */
+          if (pw.length < 8) {
+            return json({ ok: false, error: 'كلمة المرور لازم تكون 8 حروف على الأقل' }, 400, request);
+          }
+          if (pw.toLowerCase() === username.toLowerCase()) {
+            return json({ ok: false, error: 'كلمة المرور ماتكونش زي اسم المستخدم' }, 400, request);
+          }
+          newPassword = pw;
+        }
+
         await env.ALALFI_DB.prepare(
           `UPDATE users SET username = ?, name = ?, role = ?, device = ?, perms = ?, slug = ?, updated_at = datetime('now')
             WHERE id = ?`
-        ).bind(username, u.name || '', role, u.device || '', perms, slug, existing.id).run();
+        ).bind(username, displayName, role, deviceName, perms, slug, existing.id).run();
 
-        if (u.password) {
+        if (newPassword) {
           const salt = randomToken(16);
-          const h = await hashPassword(u.password, salt);
+          const h = await hashPassword(newPassword, salt);
           await env.ALALFI_DB.prepare(
             "UPDATE users SET password_hash = ?, salt = ?, updated_at = datetime('now') WHERE id = ?"
           ).bind(h, salt, existing.id).run();
@@ -147,8 +180,15 @@ export async function onRequestPut(context) {
         }
       } else {
         if (!u.password) continue;
+        const pw = String(u.password);
+        if (pw.length < 8) {
+          return json({ ok: false, error: 'كلمة المرور لازم تكون 8 حروف على الأقل' }, 400, request);
+        }
+        if (pw.toLowerCase() === username.toLowerCase()) {
+          return json({ ok: false, error: 'كلمة المرور ماتكونش زي اسم المستخدم' }, 400, request);
+        }
         const salt = randomToken(16);
-        const h = await hashPassword(u.password, salt);
+        const h = await hashPassword(pw, salt);
         await env.ALALFI_DB.prepare(
           `INSERT INTO users (username, slug, name, role, device, perms, password_hash, salt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`

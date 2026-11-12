@@ -13,7 +13,7 @@
  *  - the password is verified with PBKDF2 (old SHA-256 hashes are upgraded on login)
  */
 import {
-  json, corsHeaders, readJson, noDb, verifyPassword, randomToken,
+  json, corsHeaders, readJson, noDb, verifyPassword, randomToken, sessionHash,
   SESSION_HOURS, publicUser, getSessionUser,
   limitHit, limitAdd, limitClear, serverError,
 } from './_shared.js';
@@ -54,7 +54,8 @@ export async function onRequestPost(context) {
   if (path.endsWith('/logout')) {
     const token = request.headers.get('X-Session') || '';
     if (token) {
-      await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+      const hash = await sessionHash(token);
+      await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE token = ?').bind(hash).run();
     }
     return json({ ok: true, loggedOut: true }, 200, request);
   }
@@ -181,13 +182,14 @@ export async function onRequestPost(context) {
       ).bind(deviceInfo, bound.id).run();
     }
 
-    // create a server-side session
+    // create a server-side session (only the hash of the token is stored)
     const token = randomToken(32);
+    const hash = await sessionHash(token);
     const expiry = new Date(Date.now() + SESSION_HOURS * 3600 * 1000).toISOString()
       .replace('T', ' ').slice(0, 19);
     await env.ALALFI_DB.prepare(
       'INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'
-    ).bind(token, user.id, expiry).run();
+    ).bind(hash, user.id, expiry).run();
 
     await env.ALALFI_DB.prepare(
       `UPDATE users SET last_device = ?, last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?`

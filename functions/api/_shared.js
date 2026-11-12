@@ -185,15 +185,22 @@ export function sessionToken(request) {
   return request.headers.get('X-Session') || '';
 }
 
+/* the raw token never touches the database - only its SHA-256 hash does,
+   so a leak of the database cannot be used to open a live session */
+export async function sessionHash(token) {
+  return sha256Hex(String(token || ''));
+}
+
 export async function getSessionUser(env, request) {
   const token = sessionToken(request);
   if (!token || !env.ALALFI_DB) return null;
+  const hash = await sessionHash(token);
   const row = await env.ALALFI_DB.prepare(
     `SELECT u.id, u.username, u.name, u.role, u.device, u.perms,
             u.last_device, u.last_login, s.expires_at
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = ? AND s.expires_at > datetime('now') AND u.is_active = 1`
-  ).bind(token).first();
+  ).bind(hash).first();
   return row || null;
 }
 
