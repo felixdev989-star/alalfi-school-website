@@ -8,8 +8,18 @@
 
   function applyData(d) {
     if (!d) return;
+    /* the notification script needs the news list */
+    window.SITE_DATA = d;
 
     function esc(s) { return s == null ? '' : String(s); }
+    /* the first media item can be used as the card image */
+    function firstMedia(item) {
+      const m = item && Array.isArray(item.media) ? item.media : [];
+      for (const x of m) {
+        if (x && x.src && x.type !== 'video') return x.src;
+      }
+      return '';
+    }
     function setText(sel, val) { const el = document.querySelector(sel); if (el && val != null) el.textContent = val; }
     function setHTML(sel, val) { const el = document.querySelector(sel); if (el && val != null) el.innerHTML = val; }
     function setAttr(sel, attr, val) { const el = document.querySelector(sel); if (el && val != null) el.setAttribute(attr, val); }
@@ -169,7 +179,7 @@
       const video = n.video ? `<div style="margin-top:8px;"><a href="${esc(n.video)}" target="_blank" class="read">▶ مشاهدة الفيديو</a></div>` : '';
       return `
         <article class="news-ed-card">
-          <div class="thumb"><img src="${esc(n.img)}" alt="${esc(n.title)}"></div>
+          <div class="thumb"><img src="${esc(n.img || firstMedia(n))}" alt="${esc(n.title)}"></div>
           <div class="news-ed-meta">${esc(n.date)}</div>
           <h3>${esc(n.title)}</h3>
           <p>${esc(n.excerpt)}</p>
@@ -181,7 +191,7 @@
     if (newsGrid && Array.isArray(d.news) && d.news.length) {
       newsGrid.innerHTML = d.news.map(n => `
         <div class="news-card">
-          <div class="news-img" style="background:linear-gradient(180deg, rgba(16,35,63,0.1), rgba(16,35,63,0.55)), url('${esc(n.img)}') center/cover;"></div>
+          <div class="news-img" style="background:linear-gradient(180deg, rgba(16,35,63,0.1), rgba(16,35,63,0.55)), url('${esc(n.img || firstMedia(n))}') center/cover;"></div>
           <div class="news-body">
             <div class="news-date">${esc(n.date)}</div>
             <h3>${esc(n.title)}</h3>
@@ -196,7 +206,7 @@
     if (newsEdGrid && Array.isArray(d.news) && d.news.length) {
       newsEdGrid.innerHTML = d.news.map((n, i) => `
         <article class="news-ed-card ${i === 0 ? 'feature' : ''}">
-          <div class="thumb"><img src="${esc(n.img)}" alt="${esc(n.title)}"></div>
+          <div class="thumb"><img src="${esc(n.img || firstMedia(n))}" alt="${esc(n.title)}"></div>
           <div class="news-ed-meta">${esc(n.date)}</div>
           <h3>${esc(n.title)}</h3>
           <p>${esc(n.excerpt)}</p>

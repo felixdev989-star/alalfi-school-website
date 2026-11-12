@@ -12,6 +12,8 @@
 <meta name="theme-color" content="#0b1220">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/css/notifications.css?v=20261112">
+  <link rel="stylesheet" href="/css/media.css?v=20261112">
   <link rel="stylesheet" href="css/fonts.css?v=20261112">
 <link rel="stylesheet" href="css/style.css?v=20261112">
 <link rel="stylesheet" href="css/editorial.css?v=20261112">
@@ -50,6 +52,7 @@
     <div id="nd-image" style="margin-bottom:24px;"></div>
     <div id="nd-body" style="font-size:17px;line-height:1.9;color:var(--ink);"></div>
     <div id="nd-video" style="margin-top:20px;"></div>
+      <div id="nd-media" class="news-media"></div>
     <div style="margin-top:30px;">
       <a href="news.html" class="btn btn-dark">← العودة للأخبار</a>
     </div>
@@ -95,9 +98,10 @@
 </footer>
 
 <script src="js/content.js?v=20261112"></script>
+<script src="/js/notifications.js?v=20261112"></script>
 <script src="js/main.js?v=20261112"></script>
 <script>
-(function () {
+(async function () {
   function esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   const params = new URLSearchParams(location.search);
   const id = parseInt(params.get('id') || '0', 10);
@@ -106,7 +110,14 @@
     const d = JSON.parse(localStorage.getItem('alalfi_admin_v1'));
     if (d && Array.isArray(d.news)) news = d.news;
   } catch (e) {}
-  // fallback: try to find in a global default? none
+  // the cache may be empty (a direct visit) -> ask the server
+  if (!news.length) {
+    try {
+      const r = await fetch('/api/data', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+      const j = await r.json();
+      if (j && j.ok && j.data && Array.isArray(j.data.news)) news = j.data.news;
+    } catch (e) {}
+  }
   const item = news.find(n => n.id === id);
   const titleEl = document.getElementById('nd-title');
   const dateEl = document.getElementById('nd-date');
@@ -128,6 +139,20 @@
   bodyEl.innerHTML = esc(body).replace(/\n/g, '<br>');
   if (item.video) {
     vidEl.innerHTML = `<a href="${esc(item.video)}" target="_blank" class="btn btn-dark">▶ مشاهدة الفيديو</a>`;
+  }
+  /* the extra images / videos */
+  const mediaEl = document.getElementById('nd-media');
+  if (mediaEl && Array.isArray(item.media) && item.media.length) {
+    mediaEl.innerHTML = item.media.map((m) => {
+      const src = (m && typeof m === 'object') ? (m.src || '') : String(m || '');
+      const type = (m && typeof m === 'object') ? (m.type || 'image') : 'image';
+      const cap = (m && typeof m === 'object') ? (m.caption || '') : '';
+      if (!src) return '';
+      const inner = type === 'video'
+        ? `<video src="${esc(src)}" controls preload="metadata" style="width:100%;height:220px;object-fit:cover;"></video>`
+        : `<img src="${esc(src)}" alt="${esc(cap || item.title)}" loading="lazy" style="width:100%;height:220px;object-fit:cover;">`;
+      return `<figure>${inner}${cap ? `<figcaption>${esc(cap)}</figcaption>` : ''}</figure>`;
+    }).join('');
   }
 })();
 </script>

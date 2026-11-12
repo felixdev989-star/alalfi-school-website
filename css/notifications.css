@@ -1,0 +1,71 @@
+/* ===== the notification banner (asks for the permission) ===== */
+.notify-banner {
+  position: fixed;
+  bottom: 18px;
+  left: 18px;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 380px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid rgba(16, 35, 63, .12);
+  box-shadow: 0 18px 40px -18px rgba(16, 35, 63, .45);
+  font-family: 'Tajawal', system-ui, sans-serif;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity .35s ease, transform .35s ease;
+}
+.notify-banner.show { opacity: 1; transform: translateY(0); }
+.notify-banner-icon {
+  flex: 0 0 auto;
+  width: 42px; height: 42px;
+  border-radius: 12px;
+  display: grid; place-items: center;
+  font-size: 20px;
+  background: linear-gradient(135deg, #f59e0b, #1fa89a);
+}
+.notify-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notify-banner-text strong { font-size: 14px; color: #10233f; }
+.notify-banner-text span { font-size: 12px; color: #5b6b85; line-height: 1.6; }
+.notify-banner-yes {
+  flex: 0 0 auto;
+  border: 0;
+  cursor: pointer;
+  padding: 9px 16px;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  color: #10233f;
+  background: linear-gradient(135deg, #f59e0b, #1fa89a);
+}
+.notify-banner-no {
+  flex: 0 0 auto;
+  border: 0;
+  cursor: pointer;
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  background: transparent;
+  color: #7b8aa3;
+  font-size: 15px;
+}
+body.dark .notify-banner {
+  background: #121b2e;
+  border-color: rgba(255, 255, 255, .12);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .8);
+}
+body.dark .notify-banner-text strong { color: #e8eefc; }
+body.dark .notify-banner-text span { color: #8fa0b8; }
+body.dark .notify-banner-no { color: #8fa0b8; }
+
+@media (max-width: 640px) {
+  .notify-banner {
+    left: 12px; right: 12px; bottom: 12px;
+    max-width: none;
+    padding: 12px 14px;
+  }
+  .notify-banner-icon { width: 38px; height: 38px; font-size: 18px; }
+}

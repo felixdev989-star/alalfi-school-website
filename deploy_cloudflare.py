@@ -26,7 +26,7 @@ EXCLUDE_NAMES = {
     # never publish the database schema / seed data
     "db", "schema.sql", "seed-content.json", "schema-login.sql",
     # the Pages Functions are uploaded separately (see stage()), never as static files
-    "functions",
+    "functions", "wpe2",
 }
 EXCLUDE_EXT = {".pyc", ".log", ".tmp", ".zip", ".bak"}
 

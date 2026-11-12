@@ -142,7 +142,48 @@ let data = loadData();
 let session = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
 
 function uid(arr) { return (arr.reduce((m, x) => Math.max(m, x.id || 0), 0) || 0) + 1; }
-function readFileAsDataURL(file) { return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = e => resolve(e.target.result); r.onerror = reject; r.readAsDataURL(file); }); }
+
+/* Shrink an uploaded image before it is stored - a 4MB phone photo becomes
+   ~120KB, so the site stays fast for every visitor. */
+function compressImage(dataUrl, maxW, quality) {
+  maxW = maxW || 1400;
+  quality = quality || 0.82;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxW / (img.width || maxW));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const out = c.toDataURL('image/jpeg', quality);
+        resolve(out.length < dataUrl.length ? out : dataUrl);
+      } catch (e) { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = (e) => {
+      const url = e.target.result;
+      if (file && file.type && file.type.indexOf('image/') === 0 && url.indexOf('data:image') === 0) {
+        compressImage(url).then(resolve).catch(() => resolve(url));
+      } else {
+        resolve(url);
+      }
+    };
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
 function toast(msg, err) {
   let t = document.getElementById('toast');
   if (!t) {
@@ -213,18 +254,14 @@ function renderLogin() {
   const params = new URLSearchParams(location.search);
   const pre = (params.get('u') || '').trim();
   const link = (params.get('link') || '').trim();
-  const known = pre ? data.users.find(x => (x.username || '').toLowerCase() === pre.toLowerCase()) : null;
-  let hint = '';
-  if (pre && known) hint = 'مرحباً ' + (known.name || known.username) + ' — أدخل كلمة المرور الخاصة بك';
-  else if (pre && !link) hint = 'رابط الدخول غير معروف — تأكد من العنوان';
   document.getElementById('app').innerHTML = `
     <div class="login-screen">
       <div class="login-box">
         <img src="/images/logo.svg" alt="" style="width:70px;height:70px;margin:0 auto 12px;display:block;">
         <h1>لوحة التحكم</h1>
         <p>مدرسة الالفي الثانوية المشتركة</p>
-        ${hint ? '<div class="login-hint">' + hint + '</div>' : ''}
-        <div class="form-group"><label>اسم المستخدم</label><input id="lu" value="${esc(pre || 'admin')}"${pre ? ' readonly' : ''} autocomplete="username"></div>
+        ${pre ? `<input type="hidden" id="lu" value="${esc(pre)}">`
+              : `<div class="form-group"><label>اسم المستخدم</label><input id="lu" autocomplete="username"></div>`}
         <div class="form-group"><label>كلمة المرور</label><input id="lp" type="password" autocomplete="current-password"></div>
         <div class="form-group" id="recoveryBox" style="display:none;"><label>رمز الاسترداد (للجهاز الجديد)</label><input id="lk" type="password" placeholder="رمز الاسترداد" autocomplete="off"></div>
         <button class="btn btn-gold" style="width:100%;padding:12px;margin-top:8px;" onclick="doLogin()">تسجيل الدخول</button>
@@ -924,6 +961,105 @@ function initDashboardCharts() {
   }
 }
 
+
+/* ===== Media editor (more than one image / video per item) ===== */
+function mediaRow(m, id, i) {
+  const src = (m && m.src) ? m.src : '';
+  const type = (m && m.type) ? m.type : 'image';
+  const caption = (m && m.caption) ? m.caption : '';
+  return `<div class="media-row" data-i="${i}">
+    <div class="media-thumb">${type === 'video'
+      ? '<span class="media-video-icon">▶</span>'
+      : `<img src="${imgUrl(src)}" alt="" onerror="this.parentNode.innerHTML='🎬'">`}</div>
+    <div class="media-info">
+      <input class="media-caption" value="${esc(caption)}" placeholder="وصف اختياري">
+      <input class="media-src" value="${esc(src)}" placeholder="رابط الصورة أو الفيديو">
+    </div>
+    <button type="button" class="btn btn-danger media-del" onclick="removeMedia('${id}',${i})">✕</button>
+  </div>`;
+}
+
+function mediaEditor(id, list) {
+  const items = Array.isArray(list) ? list : [];
+  return `<div class="form-group full media-editor">
+    <label>صور / فيديوهات (متعدد)</label>
+    <div class="media-list" id="${id}_list">${items.length
+      ? items.map((m, i) => mediaRow(m, id, i)).join('')
+      : '<div class="media-empty">مفيش وسائط - أضف صورة أو فيديو</div>'}</div>
+    <div class="media-add">
+      <input id="${id}_url" placeholder="images/... أو https://..." class="media-url">
+      <select id="${id}_type"><option value="image">صورة</option><option value="video">فيديو</option></select>
+      <input type="file" id="${id}_file" accept="image/*,video/*" class="media-file">
+      <button type="button" class="btn btn-outline-ad btn-sm" onclick="addMedia('${id}')">+ أضف</button>
+    </div>
+    <input type="hidden" id="${id}" value='${esc(JSON.stringify(items))}'>
+    <small style="font-size:11px;color:var(--ad-muted);display:block;margin-top:6px;">
+      تقدر تضيف أكتر من صورة أو فيديو - كلهم بيظهروا في صفحة الخبر.
+    </small>
+  </div>`;
+}
+
+/* read the media list out of the editor */
+function readMedia(id) {
+  const hidden = document.getElementById(id);
+  let items = [];
+  try { items = JSON.parse(hidden.value || '[]'); } catch (e) { items = []; }
+  if (!Array.isArray(items)) items = [];
+  /* the caption / url typed in the rows wins */
+  const rows = document.querySelectorAll(`#${id}_list .media-row`);
+  rows.forEach((row, i) => {
+    const src = row.querySelector('.media-src');
+    const cap = row.querySelector('.media-caption');
+    if (!items[i]) items[i] = { type: 'image', src: '', caption: '' };
+    if (src) items[i].src = src.value.trim();
+    if (cap) items[i].caption = cap.value.trim();
+  });
+  items = items.filter((m) => m && m.src);
+  hidden.value = JSON.stringify(items);
+  return items;
+}
+
+/* redraw the editor rows */
+function refreshMedia(id) {
+  const items = readMedia(id);
+  const list = document.getElementById(id + '_list');
+  if (!list) return;
+  list.innerHTML = items.length
+    ? items.map((m, i) => mediaRow(m, id, i)).join('')
+    : '<div class="media-empty">مفيش وسائط - أضف صورة أو فيديو</div>';
+  document.getElementById(id).value = JSON.stringify(items);
+}
+
+async function addMedia(id) {
+  const urlInput = document.getElementById(id + '_url');
+  const typeSel = document.getElementById(id + '_type');
+  const fileInput = document.getElementById(id + '_file');
+  let src = urlInput.value.trim();
+  let type = typeSel.value;
+
+  if (fileInput && fileInput.files && fileInput.files[0]) {
+    const f = fileInput.files[0];
+    src = await readFileAsDataURL(f);
+    if ((f.type || '').indexOf('video') === 0) type = 'video';
+    toast('تم رفع الملف - اتأكد من الحجم');
+  }
+  if (!src) { toast('اكتب رابط أو ارفع ملف', true); return; }
+
+  const items = readMedia(id);
+  items.push({ type: type, src: src, caption: '' });
+  document.getElementById(id).value = JSON.stringify(items);
+  urlInput.value = '';
+  if (fileInput) fileInput.value = '';
+  refreshMedia(id);
+}
+
+function removeMedia(id, i) {
+  const items = readMedia(id);
+  items.splice(i, 1);
+  document.getElementById(id).value = JSON.stringify(items);
+  refreshMedia(id);
+}
+
 /* ===== News ===== */
 function renderNews(c) {
   c.innerHTML = `
@@ -966,6 +1102,7 @@ function newsForm(n) {
       <div class="form-group full"><label>المقتطف</label><textarea id="f_excerpt">${esc(n?.excerpt)}</textarea></div>
       <div class="form-group full"><label>النص الكامل (صفحة التفاصيل)</label><textarea id="f_body" style="min-height:160px;">${esc(n?.body)}</textarea></div>
       <div class="form-group full"><label>رابط فيديو (اختياري)</label><input id="f_video" value="${esc(n?.video)}" placeholder="https://youtube.com/... أو images/...mp4"></div>
+      ${mediaEditor('f_media', n?.media)}
     </div>
     <div class="footer">
       <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
@@ -989,6 +1126,7 @@ async function saveNews(id) {
     excerpt: document.getElementById('f_excerpt').value.trim(),
     body: document.getElementById('f_body').value.trim(),
     video: document.getElementById('f_video').value.trim(),
+    media: readMedia('f_media'),
   };
   if (id) {
     const i = data.news.findIndex(n=>n.id===id);
@@ -998,11 +1136,23 @@ async function saveNews(id) {
     data.news.unshift(obj);
   }
   if (!saveData(data)) return; closeModal(); renderSection('news'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
+  notifyVisitors('خبر جديد من مدرسة الالفي', obj.title, '/news.html?id=' + obj.id);
 }
 function deleteNews(id) {
   if (!confirm('حذف هذا الخبر؟')) return;
   data.news = data.news.filter(n=>n.id!==id);
   if (!saveData(data)) return; renderSection('news'); toast('تم الحذف — أعد تحميل صفحة الموقع');
+}
+
+/* Tell the visitors that something new was published (push notifications) */
+function notifyVisitors(title, body, url) {
+  try {
+    fetch('/api/push', {
+      method: 'POST',
+      headers: sessionHeaders(),
+      body: JSON.stringify({ action: 'send', title: title, body: body, url: url || '/news.html' }),
+    }).catch(() => { /* ignore */ });
+  } catch (e) { /* ignore */ }
 }
 
 /* ===== Events ===== */
@@ -1043,6 +1193,7 @@ function eventForm(e) {
         <select id="f_tab"><option value="dates" ${e?.tab!=='calendar'?'selected':''}>مواعيد مهمة</option><option value="calendar" ${e?.tab==='calendar'?'selected':''}>التقويم</option></select>
       </div>
       <div class="form-group full"><label>ملاحظة</label><input id="f_note" value="${esc(e?.note)}"></div>
+      ${mediaEditor('f_media', e?.media)}
     </div>
     <div class="footer">
       <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
@@ -1054,12 +1205,13 @@ function editEvent(id) { openModal(eventForm(data.events.find(e=>e.id===id))); }
 function saveEvent(id) {
   const title = document.getElementById('f_title').value.trim();
   if (!title) { toast('العنوان مطلوب', true); return; }
-  const obj = { title, date: document.getElementById('f_date').value, tab: document.getElementById('f_tab').value, note: document.getElementById('f_note').value.trim() };
+  const obj = { title, date: document.getElementById('f_date').value, tab: document.getElementById('f_tab').value, note: document.getElementById('f_note').value.trim(), media: readMedia('f_media') };
   if (id) {
     const i = data.events.findIndex(e=>e.id===id);
     data.events[i] = { ...data.events[i], ...obj };
   } else { obj.id = uid(data.events); data.events.unshift(obj); }
   if (!saveData(data)) return; closeModal(); renderSection('events'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
+  notifyVisitors('فعالية جديدة من مدرسة الالفي', obj.title, '/index.html#events');
 }
 function deleteEvent(id) {
   if (!confirm('حذف هذه الفعالية؟')) return;
@@ -1104,6 +1256,7 @@ function programForm(p) {
       <div class="form-group"><label>رابط الصورة</label><input id="f_img" value="${esc(p?.img)}" onfocus="window._lastImageField=this.id"><button type="button" class="btn btn-outline-ad btn-sm" style="margin-top:6px;" onclick="openCropper('f_img')">رفع/لصق/قص صورة</button></div>
       <div class="form-group"><label>أو رفع صورة</label><input id="f_img_file" type="file" accept="image/*"></div>
       <div class="form-group full"><label>الوصف</label><textarea id="f_desc">${esc(p?.desc)}</textarea></div>
+      ${mediaEditor('f_media', p?.media)}
     </div>
     <div class="footer">
       <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
@@ -1120,7 +1273,7 @@ async function saveProgram(id) {
   if (fileInput && fileInput.files && fileInput.files[0]) {
     img = await readFileAsDataURL(fileInput.files[0]);
   }
-  const obj = { title, age: document.getElementById('f_age').value.trim(), img: img, desc: document.getElementById('f_desc').value.trim() };
+  const obj = { title, age: document.getElementById('f_age').value.trim(), img: img, desc: document.getElementById('f_desc').value.trim(), media: readMedia('f_media') };
   if (id) { const i = data.programs.findIndex(p=>p.id===id); data.programs[i] = { ...data.programs[i], ...obj }; }
   else { obj.id = uid(data.programs); data.programs.push(obj); }
   if (!saveData(data)) return; closeModal(); renderSection('programs'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
@@ -1241,8 +1394,10 @@ function staffForm(s) {
       <div class="form-group"><label>الاسم</label><input id="f_name" value="${esc(s?.name)}"></div>
       <div class="form-group"><label>المنصب</label><input id="f_role" value="${esc(s?.role)}"></div>
       <div class="form-group full"><label>رابط الصورة (اختياري)</label><input id="f_img" value="${esc(s?.img)}" placeholder="images/..." onfocus="window._lastImageField=this.id"><button type="button" class="btn btn-outline-ad btn-sm" style="margin-top:6px;" onclick="openCropper('f_img')">رفع/لصق/قص صورة</button></div>
+      ${mediaEditor('f_media', s?.media)}
       <div class="form-group full"><label>أو رفع صورة</label><input id="f_img_file" type="file" accept="image/*"></div>
       <div class="form-group full"><label>نبذة</label><textarea id="f_bio">${esc(s?.bio)}</textarea></div>
+      ${mediaEditor('f_media', s?.media)}
     </div>
     <div class="footer">
       <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
@@ -1259,7 +1414,7 @@ async function saveStaff(id) {
   if (fileInput && fileInput.files && fileInput.files[0]) {
     img = await readFileAsDataURL(fileInput.files[0]);
   }
-  const obj = { name, role: document.getElementById('f_role').value.trim(), img: img, bio: document.getElementById('f_bio').value.trim() };
+  const obj = { name, role: document.getElementById('f_role').value.trim(), img: img, bio: document.getElementById('f_bio').value.trim(), media: readMedia('f_media') };
   if (id) { const i = data.staff.findIndex(s=>s.id===id); data.staff[i] = { ...data.staff[i], ...obj }; }
   else { obj.id = uid(data.staff); data.staff.push(obj); }
   if (!saveData(data)) return; closeModal(); renderSection('staff'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
@@ -1304,8 +1459,10 @@ function leaderForm(l) {
       <div class="form-group"><label>الاسم</label><input id="f_name" value="${esc(l?.name)}"></div>
       <div class="form-group"><label>المنصب</label><input id="f_role" value="${esc(l?.role)}"></div>
       <div class="form-group full"><label>رابط الصورة (اختياري)</label><input id="f_img" value="${esc(l?.img)}" placeholder="images/..." onfocus="window._lastImageField=this.id"><button type="button" class="btn btn-outline-ad btn-sm" style="margin-top:6px;" onclick="openCropper('f_img')">رفع/لصق/قص صورة</button></div>
+      ${mediaEditor('f_media', l?.media)}
       <div class="form-group full"><label>أو رفع صورة</label><input id="f_img_file" type="file" accept="image/*"></div>
       <div class="form-group full"><label>نبذة</label><textarea id="f_bio">${esc(l?.bio)}</textarea></div>
+      ${mediaEditor('f_media', l?.media)}
     </div>
     <div class="footer">
       <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
@@ -1322,7 +1479,7 @@ async function saveLeader(id) {
   if (fileInput && fileInput.files && fileInput.files[0]) {
     img = await readFileAsDataURL(fileInput.files[0]);
   }
-  const obj = { name, role: document.getElementById('f_role').value.trim(), img: img, bio: document.getElementById('f_bio').value.trim() };
+  const obj = { name, role: document.getElementById('f_role').value.trim(), img: img, bio: document.getElementById('f_bio').value.trim(), media: readMedia('f_media') };
   if (id) { const i = data.leaders.findIndex(l=>l.id===id); data.leaders[i] = { ...data.leaders[i], ...obj }; }
   else { obj.id = uid(data.leaders); data.leaders.push(obj); }
   if (!saveData(data)) return; closeModal(); renderSection('leaders'); toast('تم الحفظ — أعد تحميل صفحة الموقع لرؤية التغييرات');
