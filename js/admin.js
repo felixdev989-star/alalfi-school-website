@@ -616,7 +616,27 @@ function renderSection(id) {
     users: renderUsers,
   };
   renders[id](c);
+  labelTableCells(c);
   applyPerms(id, c);
+}
+
+/* Give every table cell the label of its column, so the mobile layout can
+   turn the table into readable cards instead of hiding it behind a scroll */
+function labelTableCells(c) {
+  if (!c) return;
+  c.querySelectorAll('.table-wrap table').forEach((table) => {
+    const head = table.querySelector('thead');
+    if (!head) return;
+    const labels = [...head.querySelectorAll('th')].map((th) => th.innerText.trim());
+    table.querySelectorAll('tbody tr').forEach((tr) => {
+      [...tr.children].forEach((td, i) => {
+        if (td.tagName !== 'TD') return;
+        if (!td.getAttribute('data-label') && labels[i]) {
+          td.setAttribute('data-label', labels[i]);
+        }
+      });
+    });
+  });
 }
 
 /* Hide actions the current user is not allowed to perform */
@@ -649,39 +669,84 @@ function applyPerms(id, c) {
 }
 
 /* ===== Dashboard ===== */
+const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+
+/* the last N months as {key:'2026-11', label:'نوفمبر'} */
+function lastMonths(n) {
+  const out = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push({
+      key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'),
+      label: AR_MONTHS[d.getMonth()],
+    });
+  }
+  return out;
+}
+
+/* count how many items of a list fall in each month */
+function countByMonth(list, months) {
+  const counts = months.map(() => 0);
+  (list || []).forEach((item) => {
+    const d = String((item && item.date) || '').slice(0, 7);
+    const i = months.findIndex((m) => m.key === d);
+    if (i >= 0) counts[i]++;
+  });
+  return counts;
+}
+
+/* the stage out of a program title (الصف الأول الثانوي -> الأول) */
+function programStage(title) {
+  const t = String(title || '');
+  if (t.includes('الأول')) return 'الأول';
+  if (t.includes('الثاني')) return 'الثاني';
+  if (t.includes('الثالث')) return 'الثالث';
+  return 'أخرى';
+}
+
 function renderDashboard(c) {
   destroyCharts();
+  const newsCount = (data.news || []).length;
+  const eventsCount = (data.events || []).length;
+  const programsCount = (data.programs || []).length;
+  const galleryCount = (data.gallery || []).length;
+  const leadersCount = (data.leaders || []).length;
+  const staffCount = (data.staff || []).length;
+  const usersCount = (data.users || []).length;
+
   c.innerHTML = `
     <div class="cards">
-      <div class="card"><span class="icon">📰</span><div class="label">Total Value</div><div class="value">${data.news.length}</div><div class="sub">خبر منشور</div></div>
-      <div class="card"><span class="icon">📅</span><div class="label">Daily Profit</div><div class="value">${data.events.length}</div><div class="sub">فعالية مجدولة</div></div>
-      <div class="card"><span class="icon">🎓</span><div class="label">Bots Working</div><div class="value">${data.programs.length}</div><div class="sub">برنامج تعليمي</div></div>
-      <div class="card accent"><span class="icon">👥</span><div class="label">Algos Total</div><div class="value">${data.staff.length}</div><div class="sub">موظف</div></div>
+      <div class="card"><span class="icon">📰</span><div class="label">إجمالي الأخبار</div><div class="value">${newsCount}</div><div class="sub">خبر منشور</div></div>
+      <div class="card"><span class="icon">📅</span><div class="label">الفعاليات</div><div class="value">${eventsCount}</div><div class="sub">فعالية مسجلة</div></div>
+      <div class="card"><span class="icon">🎓</span><div class="label">البرامج</div><div class="value">${programsCount}</div><div class="sub">برنامج دراسي</div></div>
+      <div class="card accent"><span class="icon">🖼️</span><div class="label">صور المعرض</div><div class="value">${galleryCount}</div><div class="sub">صورة بالمعرض</div></div>
     </div>
 
     <div class="chart-card slide-up" style="margin-bottom:18px;">
-      <h3>Global Progress <span class="badge badge-gold">USD</span></h3>
+      <h3>النشاط خلال الشهور <span class="badge badge-gold">آخر 8 شهور</span></h3>
       <div class="chart-wrap"><canvas id="chartArea"></canvas></div>
     </div>
 
     <div class="grid-2 full">
       <div class="chart-card">
-        <h3>Allocation by Currency</h3>
+        <h3>توزيع المحتوى</h3>
         <div class="chart-wrap"><canvas id="chartDonut1"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Allocation by Algo</h3>
+        <h3>صور الموقع</h3>
         <div class="chart-wrap"><canvas id="chartDonut2"></canvas></div>
       </div>
     </div>
 
     <div class="grid-2">
       <div class="chart-card">
-        <h3>Profit by Bot</h3>
+        <h3>الأخبار حسب الشهر</h3>
         <div class="chart-wrap"><canvas id="chartBar1"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>Profit by Algo</h3>
+        <h3>البرامج حسب المرحلة</h3>
         <div class="chart-wrap"><canvas id="chartBar2"></canvas></div>
       </div>
     </div>
@@ -691,9 +756,9 @@ function renderDashboard(c) {
       <table>
         <thead><tr><th>العنوان</th><th>التاريخ</th><th>الإجراءات</th></tr></thead>
         <tbody>
-          ${data.news.slice(0,6).map(n => `<tr>
-            <td>${n.title}</td>
-            <td>${n.date}</td>
+          ${(data.news || []).slice(0, 6).map(n => `<tr>
+            <td>${esc(n.title)}</td>
+            <td>${esc(n.date || '')}</td>
             <td><button class="btn btn-outline-ad btn-sm" onclick="editNews(${n.id})">تعديل</button></td>
           </tr>`).join('') || '<tr><td colspan="3"><div class="empty"><div class="ic">📰</div><h4>لا توجد أخبار</h4><p>أضف أول خبر من قسم الأخبار</p></div></td></tr>'}
         </tbody>
@@ -703,7 +768,12 @@ function renderDashboard(c) {
       <button class="btn btn-gold" onclick="switchSection('news')">إدارة الأخبار</button>
       <button class="btn btn-outline-ad" onclick="exportData()">تصدير البيانات</button>
       <button class="btn btn-outline-ad" onclick="resetData()">إعادة تعيين</button>
-    </div>`;
+    </div>
+    <p style="margin-top:18px;color:var(--ad-muted);font-size:12px;">
+      إجمالي الحسابات: <b style="color:var(--ad-gold);">${usersCount}</b> &nbsp;|&nbsp;
+      أعضاء القيادة: <b style="color:var(--ad-gold);">${leadersCount}</b> &nbsp;|&nbsp;
+      الكادر التعليمي: <b style="color:var(--ad-gold);">${staffCount}</b>
+    </p>`;
   setTimeout(initDashboardCharts, 50);
 }
 
@@ -714,26 +784,40 @@ function initDashboardCharts() {
   const blue = '#3b82f6';
   const purple = '#a855f7';
 
+  const months = lastMonths(8);
+  const labels = months.map((m) => m.label);
+  const newsPerMonth = countByMonth(data.news, months);
+  const eventsPerMonth = countByMonth(data.events, months);
+
   const ctxArea = document.getElementById('chartArea');
   if (ctxArea) {
     charts.area = new Chart(ctxArea, {
       type: 'line',
       data: {
-        labels: ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'],
-        datasets: [{
-          label: 'Progress',
-          data: [12, 19, 15, 25, 22, 30, 28, 35, 40, 45],
-          borderColor: turquoise,
-          backgroundColor: 'rgba(45,212,191,0.18)',
-          fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2,
-        }]
+        labels: labels,
+        datasets: [
+          {
+            label: 'أخبار',
+            data: newsPerMonth,
+            borderColor: turquoise,
+            backgroundColor: 'rgba(45,212,191,0.18)',
+            fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2,
+          },
+          {
+            label: 'فعاليات',
+            data: eventsPerMonth,
+            borderColor: orange,
+            backgroundColor: 'rgba(249,115,22,0.15)',
+            fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2,
+          },
+        ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: { legend: { labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12 } } },
         scales: {
           x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 11 } } },
-          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 11 } } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 11 }, precision: 0 } },
         }
       }
     });
@@ -744,9 +828,12 @@ function initDashboardCharts() {
     charts.d1 = new Chart(ctxD1, {
       type: 'doughnut',
       data: {
-        labels: ['أخبار', 'فعاليات', 'برامج', 'كادر'],
-        datasets: [{ data: [data.news.length, data.events.length, data.programs.length, data.staff.length],
-          backgroundColor: [turquoise, orange, blue, purple], borderWidth: 0, hoverOffset: 6 }]
+        labels: ['أخبار', 'فعاليات', 'برامج', 'قيادة', 'كادر'],
+        datasets: [{ data: [
+          (data.news || []).length, (data.events || []).length, (data.programs || []).length,
+          (data.leaders || []).length, (data.staff || []).length,
+        ],
+          backgroundColor: [turquoise, orange, blue, purple, '#ec4899'], borderWidth: 0, hoverOffset: 6 }]
       },
       options: { responsive: true, maintainAspectRatio: false, cutout: '70%',
         plugins: { legend: { position: 'right', labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 10 } } } }
@@ -755,11 +842,14 @@ function initDashboardCharts() {
 
   const ctxD2 = document.getElementById('chartDonut2');
   if (ctxD2) {
+    const newsImg = (data.news || []).filter((n) => n.img).length;
+    const progImg = (data.programs || []).filter((p) => p.img).length;
+    const leadImg = (data.leaders || []).filter((l) => l.img).length;
     charts.d2 = new Chart(ctxD2, {
       type: 'doughnut',
       data: {
-        labels: ['صور', 'فيديوهات', 'مستخدمون', 'رسائل'],
-        datasets: [{ data: [data.gallery.length, Math.max(1, Math.floor(data.gallery.length/3)), data.users.length, 5],
+        labels: ['صور المعرض', 'صور الأخبار', 'صور البرامج', 'صور القيادة'],
+        datasets: [{ data: [(data.gallery || []).length, newsImg, progImg, leadImg],
           backgroundColor: [turquoise, orange, blue, purple], borderWidth: 0, hoverOffset: 6 }]
       },
       options: { responsive: true, maintainAspectRatio: false, cutout: '70%',
@@ -772,10 +862,10 @@ function initDashboardCharts() {
     charts.b1 = new Chart(ctxB1, {
       type: 'bar',
       data: {
-        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+        labels: labels,
         datasets: [
-          { label: 'أرباح', data: [12, 19, 15, 25, 22, 30], backgroundColor: turquoise, borderRadius: 4 },
-          { label: 'خسائر', data: [-3, -5, -2, -4, -1, -6], backgroundColor: orange, borderRadius: 4 },
+          { label: 'أخبار', data: newsPerMonth, backgroundColor: turquoise, borderRadius: 4 },
+          { label: 'فعاليات', data: eventsPerMonth, backgroundColor: orange, borderRadius: 4 },
         ]
       },
       options: {
@@ -783,7 +873,7 @@ function initDashboardCharts() {
         plugins: { legend: { labels: { color: '#8a93a6', font: { size: 11 } } } },
         scales: {
           x: { grid: { display: false }, ticks: { color: '#8a93a6', font: { size: 10 }, maxRotation: 45 } },
-          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 10 } } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 10 }, precision: 0 } },
         }
       }
     });
@@ -791,21 +881,22 @@ function initDashboardCharts() {
 
   const ctxB2 = document.getElementById('chartBar2');
   if (ctxB2) {
+    const stages = ['الأول', 'الثاني', 'الثالث', 'أخرى'];
+    const stageCounts = stages.map((s) => (data.programs || []).filter((p) => programStage(p.title) === s).length);
     charts.b2 = new Chart(ctxB2, {
       type: 'bar',
       data: {
-        labels: ['A', 'B', 'C', 'D', 'E', 'F'],
+        labels: stages,
         datasets: [
-          { label: 'أرباح', data: [8, 14, 10, 20, 16, 24], backgroundColor: turquoise, borderRadius: 4 },
-          { label: 'خسائر', data: [-2, -4, -1, -3, -2, -5], backgroundColor: orange, borderRadius: 4 },
+          { label: 'عدد البرامج', data: stageCounts, backgroundColor: turquoise, borderRadius: 4 },
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { labels: { color: '#8a93a6', font: { size: 11 } } } },
         scales: {
-          x: { grid: { display: false }, ticks: { color: '#8a93a6', font: { size: 10 }, maxRotation: 45 } },
-          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 10 } } },
+          x: { grid: { display: false }, ticks: { color: '#8a93a6', font: { size: 10 } } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 10 }, precision: 0 } },
         }
       }
     });
@@ -1027,14 +1118,21 @@ function renderGallery(c) {
       <button class="btn btn-gold" onclick="addGallery()">+ إضافة صورة/فيديو</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;">
-      ${data.gallery.map((g,i) => `
-        <div class="card" style="padding:8px;">
-          ${g.type === 'video' ? `<video src="${g.src}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" muted></video>` : `<img src="${g.src}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" onerror="this.style.background='#eee'">`}
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-            <span style="font-size:11px;color:var(--ad-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;">${g.src}</span>
-            <button class="btn btn-danger" style="padding:2px 6px;font-size:10px;" onclick="deleteGallery(${i})">حذف</button>
+      ${data.gallery.map((g,i) => {
+        const src = (g && typeof g === 'object') ? (g.src || '') : String(g || '');
+        const type = (g && typeof g === 'object') ? (g.type || 'image') : 'image';
+        const name = src.split('/').pop() || src;
+        return `
+        <div class="card gal-card" style="padding:8px;">
+          ${type === 'video'
+            ? `<video src="${esc(src)}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" muted></video>`
+            : `<img src="${esc(src)}" alt="${esc(name)}" style="width:100%;height:120px;object-fit:cover;border-radius:6px;" onerror="this.style.background='#eee'">`}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;">
+            <span title="${esc(src)}" style="font-size:11px;color:var(--ad-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;">${esc(name)}</span>
+            <button class="btn btn-danger gal-del" onclick="deleteGallery(${i})">حذف</button>
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>`;
 }
 function addGallery() {
@@ -1551,7 +1649,9 @@ function deleteUser(id) {
 /* ===== My account (per-user login link + password) ===== */
 function renderAccount(c) {
   const u = data.users.find(x => x.id === session.id) || session;
-  const link = userLoginUrl(u.username);
+  const loginLink = userLoginUrl(u.username);
+  const personalLink = u.slug ? personalUrl(u.slug) : '';
+  const link = personalLink || loginLink;
   c.innerHTML = `
     <div class="card" style="margin-bottom:18px;">
       <h3 style="font-family:var(--ad-font-head);margin-bottom:14px;">بيانات حسابي</h3>
@@ -1566,13 +1666,16 @@ function renderAccount(c) {
     </div>
 
     <div class="card" style="margin-bottom:18px;">
-      <h3 style="font-family:var(--ad-font-head);margin-bottom:10px;">رابط الدخول الخاص ب��</h3>
+      <h3 style="font-family:var(--ad-font-head);margin-bottom:10px;">رابط الدخول الخاص بك</h3>
       <p style="color:var(--ad-muted);font-size:13px;margin-bottom:12px;">هذا الرابط مخصص لحسابك فقط. افتحه في أي جهاز وسجّل الدخول باسمك وكلمة مرورك — لا تحتاج لكتابة اسم المستخدم.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="myLink" readonly value="${esc(link)}" style="flex:1;min-width:250px;padding:10px 12px;border-radius:8px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);font-size:12px;">
+        <input id="myLink" readonly value="${esc(link)}" style="flex:1;min-width:250px;padding:10px 12px;border-radius:8px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);font-size:12px;direction:ltr;text-align:left;">
         <button class="btn btn-gold" onclick="copyText('myLink')">نسخ الرابط</button>
         <a class="btn btn-outline-ad" href="${esc(link)}" target="_blank">فتح الرابط</a>
       </div>
+      ${personalLink ? `<p style="color:var(--ad-muted);font-size:12px;margin-top:10px;">
+        رابط الدخول العادي: <span style="direction:ltr;display:inline-block;color:var(--ad-gold);">${esc(loginLink)}</span>
+      </p>` : ''}
     </div>
 
     <div class="card" style="margin-bottom:18px;">
@@ -1757,7 +1860,12 @@ function openModal(html) {
   document.getElementById('modal').innerHTML = html;
   document.getElementById('modalBackdrop').classList.add('show');
 }
-function closeModal() { document.getElementById('modalBackdrop').classList.remove('show'); }
+function closeModal() {
+  const back = document.getElementById('modalBackdrop');
+  if (back) back.classList.remove('show');
+  const m = document.getElementById('modal');
+  if (m) m.innerHTML = '';
+}
 document.addEventListener('click', e => {
   if (e.target.id === 'modalBackdrop') closeModal();
   if (e.target.id === 'cropBackdrop') closeCropper();

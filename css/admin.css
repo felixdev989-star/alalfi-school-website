@@ -152,13 +152,30 @@ img { max-width: 100%; }
 .table-wrap::-webkit-scrollbar-thumb:hover { background: var(--ad-gold); }
 
 /* users table - login link cell */
-.ulink-row { display: flex; gap: 6px; align-items: center; min-width: 250px; }
+.ulink-row { display: flex; gap: 6px; align-items: center; min-width: 300px; }
+.ulink-cell { min-width: 290px; }
 .ulink-input {
-  flex: 1; min-width: 120px; padding: 5px 8px; font-size: 11px;
+  flex: 1; min-width: 150px; padding: 7px 9px; font-size: 11.5px;
   border-radius: 6px; border: 1px solid var(--ad-line);
   background: var(--ad-card); color: var(--ad-ink);
+  direction: ltr; text-align: left;
 }
-.ulink-btn { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+.ulink-btn {
+  padding: 7px 10px; font-size: 11.5px; white-space: nowrap;
+  min-height: 32px; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* action buttons inside the tables - a comfortable size to click */
+.table-wrap td button,
+.table-wrap td a.btn {
+  min-height: 30px;
+  padding: 6px 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* the small delete button of a gallery item */
+.gal-del { min-height: 28px; padding: 4px 10px; font-size: 11px; }
 
 /* responsive 2-column grid (dashboard charts) */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -400,6 +417,122 @@ body.sidebar-open { overflow: hidden; }
   .topbar .user-chip span { display: none; }
   /* the global +add button duplicates each section's own add button - hide it */
   .topbar .top-add-btn { display: none !important; }
+}
+
+/* =========================================================
+   Mobile: turn every table into readable cards
+   (so no button or link is ever hidden off-screen)
+   ========================================================= */
+@media (max-width: 720px) {
+  .table-wrap {
+    overflow-x: visible;
+    border: none;
+    background: transparent;
+  }
+  .table-wrap table,
+  .table-wrap tbody,
+  .table-wrap tr,
+  .table-wrap td {
+    display: block;
+    width: 100%;
+  }
+  .table-wrap thead { display: none; }
+  .table-wrap tbody tr {
+    background: var(--ad-card);
+    border: 1px solid var(--ad-line);
+    border-radius: 14px;
+    margin-bottom: 12px;
+    padding: 6px 14px;
+    box-shadow: 0 6px 18px -14px rgba(0, 0, 0, 0.8);
+  }
+  .table-wrap tbody tr:last-child { margin-bottom: 0; }
+  .table-wrap tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    white-space: normal;
+    padding: 9px 0;
+    border: none;
+    border-bottom: 1px dashed var(--ad-line);
+    text-align: right;
+    font-size: 13px;
+  }
+  .table-wrap tbody td:last-child { border-bottom: none; }
+  .table-wrap tbody td::before {
+    content: attr(data-label);
+    color: var(--ad-muted);
+    font-size: 11px;
+    font-weight: 700;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .table-wrap tbody td:empty { display: none; }
+  /* the label is useless when the cell only holds buttons */
+  .table-wrap tbody td:has(button)::before,
+  .table-wrap tbody td:has(> .ulink-row:only-child)::before,
+  .table-wrap tbody td:has(> a:only-child)::before { content: none; }
+  .table-wrap tbody td > * { min-width: 0; }
+  .table-wrap tbody td img { max-width: 120px; height: auto; }
+  /* the personal-link cell: the label on top, the full link below */
+  .table-wrap tbody td:has(> .ulink-row:only-child) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .ulink-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+  .ulink-input { grid-column: 1 / -1; width: 100%; min-width: 0; font-size: 12px; padding: 9px 10px; }
+  .ulink-btn { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; }
+  /* the actions row becomes a full-width button row (only when it holds buttons) */
+  .table-wrap tbody td:last-child:has(button),
+  .table-wrap tbody td:last-child:has(a.btn) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-start;
+  }
+  .table-wrap tbody td:last-child:has(button),
+  .table-wrap tbody td:last-child:has(a.btn) > button,
+  .table-wrap tbody td:last-child:has(a.btn) > a {
+    flex: 1 1 auto;
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ulink-row { flex-direction: column; align-items: stretch; gap: 8px; width: 100%; }
+  .ulink-input { width: 100%; min-width: 0; font-size: 12px; padding: 9px 10px; }
+  .ulink-btn { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+  /* comfortable tap targets everywhere */
+  .table-wrap tbody td button,
+  .table-wrap tbody td a.btn {
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* every other button of the panel too */
+  .content .btn, .content .btn-sm, .modal .footer .btn {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .topbar .company-select {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .empty { padding: 24px 8px; }
 }
 .menu-toggle { background: none; font-size: 22px; color: var(--ad-ink); }
 
