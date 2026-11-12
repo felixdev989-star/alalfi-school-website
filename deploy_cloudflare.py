@@ -75,6 +75,60 @@ def stage():
     return root, site
 
 
+PANEL_PROJECT = "alalfi-panel"
+
+
+def stage_panel():
+    """A second staging folder: the admin panel lives on its OWN origin
+    (alalfi-panel.pages.dev) so the home-screen app is never merged with the
+    public school site."""
+    root = tempfile.mkdtemp(prefix="alalfi-panel-")
+    site = os.path.join(root, "site")
+    os.makedirs(site, exist_ok=True)
+
+    # the assets the panel needs
+    for name in ("css", "js", "fonts"):
+        src = os.path.join(ROOT, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(site, name), dirs_exist_ok=True)
+    # the images (the panel shows previews + the logo)
+    src_img = os.path.join(ROOT, "images")
+    if os.path.isdir(src_img):
+        shutil.copytree(src_img, os.path.join(site, "images"), dirs_exist_ok=True)
+
+    # the panel page + its own manifest
+    os.makedirs(os.path.join(site, "panel"), exist_ok=True)
+    for f in ("index.html", "manifest.webmanifest"):
+        p = os.path.join(ROOT, "panel", f)
+        if os.path.isfile(p):
+            shutil.copy2(p, os.path.join(site, "panel", f))
+
+    # the security headers
+    for f in ("_headers",):
+        p = os.path.join(ROOT, f)
+        if os.path.isfile(p):
+            shutil.copy2(p, os.path.join(site, f))
+
+    # the functions (the API + the panel gate)
+    fn_src = os.path.join(ROOT, "functions")
+    if os.path.isdir(fn_src):
+        shutil.copytree(fn_src, os.path.join(root, "functions"), dirs_exist_ok=True)
+
+    with open(os.path.join(root, "wrangler.toml"), "w", encoding="utf-8") as f:
+        f.write(
+            f'name = "{PANEL_PROJECT}"\n'
+            'compatibility_date = "2026-11-10"\n'
+            'pages_build_output_dir = "site"\n\n'
+            '[[d1_databases]]\n'
+            'binding = "ALALFI_DB"\n'
+            f'database_name = "{D1_NAME}"\n'
+            f'database_id = "{D1_ID}"\n\n'
+            '[[kv_namespaces]]\n'
+            'binding = "CONTENT"\n'
+            f'id = "{KV_ID}"\n'
+        )
+    return root, site
+
 def api(method, path, token, body=None):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     data = json.dumps(body).encode() if body is not None else None
@@ -122,6 +176,20 @@ def main():
 
     shutil.rmtree(root, ignore_errors=True)
     print(f"\n==> live: https://{project}.pages.dev")
+
+    # ---------------- the panel (its own origin) ----------------
+    print("==> staging the panel (separate origin)")
+    proot, psite = stage_panel()
+    print(f"    {sum(len(f) for _, _, f in os.walk(psite))} files staged")
+    p = subprocess.run(
+        f'node "{wrangler}" pages deploy site --project-name {PANEL_PROJECT} --branch main --commit-dirty=true',
+        cwd=proot, capture_output=True, text=True, shell=True, env=env,
+        encoding="utf-8", errors="replace")
+    tail = (p.stdout or "").strip().splitlines()
+    print("   ", tail[-1] if tail else (p.stderr or "")[:200])
+    shutil.rmtree(proot, ignore_errors=True)
+    print(f"==> panel: https://{PANEL_PROJECT}.pages.dev/panel/")
+
 
 
 if __name__ == "__main__":

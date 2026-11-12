@@ -1,16 +1,15 @@
 /**
- * GET /admin/<slug>  ->  the personal link of one admin account.
+ * GET /u/<slug>  ->  the personal link of one admin account.
  *
- *   https://alalfi-school.pages.dev/admin/ahmed  ->  /admin.html?u=ahmed&link=ahmed
- *
- * The device id is stored in a cookie so the browser stays "recognised".
- * The real binding decision is made by /api/devices (register) which the
- * admin page calls right after it loads - that way the server also knows
- * the device model (Realme C55, Windows, ...).
+ * The panel lives on its OWN origin (alalfi-panel.pages.dev) so the
+ * home-screen app is never merged with the public school site.
+ * The device id travels with the link, so the same phone stays "the same
+ * device" and does not need a new approval.
  */
 import { noDb } from '../api/_shared.js';
 
 export const DEVICE_COOKIE = 'ald_did';
+const PANEL_ORIGIN = 'https://alalfi-panel.pages.dev';
 
 function randId() {
   const a = new Uint8Array(16);
@@ -29,7 +28,7 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
   const slug = (url.pathname.split('/').filter(Boolean)[1] || '').trim();
 
-  if (!slug) return redirectTo('/admin.html');
+  if (!slug) return redirectTo(PANEL_ORIGIN + '/panel/');
 
   let user = null;
   try {
@@ -42,7 +41,7 @@ export async function onRequestGet(context) {
     user = null;
   }
 
-  if (!user) return redirectTo('/admin.html');
+  if (!user) return redirectTo(PANEL_ORIGIN + '/panel/');
 
   // device id (cookie)
   const cookies = (request.headers.get('Cookie') || '').split(';').map((c) => c.trim());
@@ -55,10 +54,9 @@ export async function onRequestGet(context) {
     ? `${DEVICE_COOKIE}=${deviceId}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`
     : null;
 
-  return redirectTo(
-    `/admin.html?u=${encodeURIComponent(user.username)}&link=${encodeURIComponent(slug)}`,
-    cookie
-  );
+  const target = `${PANEL_ORIGIN}/panel/?u=${encodeURIComponent(user.username)}` +
+                 `&link=${encodeURIComponent(slug)}&did=${encodeURIComponent(deviceId)}`;
+  return redirectTo(target, cookie);
 }
 
 export async function onRequestPost(context) {

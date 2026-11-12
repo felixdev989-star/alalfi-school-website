@@ -347,6 +347,14 @@ function deviceId() {
   if (m) { try { id = decodeURIComponent(m[1]); } catch (e) { id = m[1]; } }
   // 2) localStorage backup
   if (!id) { try { id = localStorage.getItem('ald_did') || ''; } catch (e) { id = ''; } }
+  // 2b) the personal link can carry the device id (?did=) - so the same
+  //     phone stays the same device and needs no new approval
+  if (!id) {
+    try {
+      const q = new URLSearchParams(location.search).get('did');
+      if (q) id = q;
+    } catch (e) { /* ignore */ }
+  }
   // 3) create one
   if (!id) {
     id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
@@ -415,8 +423,8 @@ function doLogin() {
     .then(res => {
       if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول'; }
       if (!res || !res.ok) {
-        if (panelKeyMissing(res)) {
-          toast('مفتاح اللوحة غير صحيح - هنتقل لصفحة الدخول', true);
+        if (res && res.error === 'panel_key_required') {
+          askPanelKey(() => doLogin());
           return;
         }
         if (res && res.error === 'device_pending') {
@@ -1870,8 +1878,18 @@ function deviceAction(action, deviceId, userId) {
 
 /* ===== Modal helpers ===== */
 function openModal(html) {
-  document.getElementById('modal').innerHTML = html;
-  document.getElementById('modalBackdrop').classList.add('show');
+  /* the login screen has no modal yet - create it on demand */
+  let back = document.getElementById('modalBackdrop');
+  if (!back) {
+    back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.id = 'modalBackdrop';
+    back.innerHTML = '<div class="modal" id="modal"></div>';
+    document.body.appendChild(back);
+  }
+  const m = document.getElementById('modal');
+  if (m) m.innerHTML = html;
+  back.classList.add('show');
 }
 function closeModal() {
   const back = document.getElementById('modalBackdrop');
@@ -2117,6 +2135,50 @@ function panelKeyMissing(res) {
     return true;
   }
   return false;
+}
+
+/* Ask for the panel key inside the panel (used when the key is not known
+   in this browser yet - for example the first time in the home-screen app) */
+function askPanelKey(after) {
+  openModal(`
+    <h3>مفتاح اللوحة</h3>
+    <p style="color:var(--ad-muted);font-size:13px;line-height:1.9;margin-bottom:14px;">
+      هذا المتصفح مش عارف مفتاح اللوحة لسه. اكتبه مرة واحدة وهيتحفظ هنا.
+    </p>
+    <div class="form-group"><label>مفتاح اللوحة</label>
+      <input id="pkBox" type="password" autocomplete="off" placeholder="مفتاح اللوحة"></div>
+    <div class="modal-footer" style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-outline-ad" onclick="closeModal()">إلغاء</button>
+      <button class="btn btn-gold" id="pkSave">حفظ ومتابعة</button>
+    </div>`);
+  setTimeout(() => {
+    const inp = document.getElementById('pkBox');
+    if (inp) inp.focus();
+    const save = document.getElementById('pkSave');
+    if (!save) return;
+    save.onclick = async () => {
+      const key = (inp.value || '').trim();
+      if (!key) { toast('اكتب المفتاح', true); return; }
+      try {
+        const r = await fetch('/api/panel-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key })
+        });
+        const j = await r.json();
+        if (j && j.ok) {
+          try { localStorage.setItem('alalfi_panel_key', key); } catch (e) { /* ignore */ }
+          closeModal();
+          toast('تم حفظ المفتاح');
+          if (typeof after === 'function') after();
+        } else {
+          toast((j && j.error) || 'المفتاح غير صحيح', true);
+        }
+      } catch (e) {
+        toast('تعذّر الاتصال بالسيرفر', true);
+      }
+    };
+  }, 120);
 }
 function endSession() {
   const t = sessionToken();

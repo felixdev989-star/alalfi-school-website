@@ -1,9 +1,9 @@
-# The admin panel is not a normal page any more - it lives behind a secret key
-# at /panel/ . The old direct path only leads to the gate.
-/admin.html         /panel/  302
-/admin              /panel/  302
-/admin.htm          /panel/  302
-/panel/index.html   /panel/  302
+# The admin panel lives on its OWN origin (alalfi-panel.pages.dev) so the
+# home-screen app is never merged with the public school site.
+/panel/*            https://alalfi-panel.pages.dev/panel/:splat  302
+/admin.html         https://alalfi-panel.pages.dev/panel/  302
+/admin              https://alalfi-panel.pages.dev/panel/  302
+/admin.htm          https://alalfi-panel.pages.dev/panel/  302
 
 # Block development / tooling files from being served publicly.
 /deploy.bat               /  302

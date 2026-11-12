@@ -110,6 +110,10 @@ const GATE = `<!DOCTYPE html>
   var saved = localStorage.getItem('alalfi_panel_key');
   if (saved) input.value = saved;
 
+  /* the key may come in the link: /panel/?k=... */
+  var q = new URLSearchParams(location.search).get('k');
+  if (q) { input.value = q; }
+
   function fail(msg) {
     err.textContent = msg;
     err.classList.add('on');
@@ -142,14 +146,28 @@ const GATE = `<!DOCTYPE html>
   }
   btn.addEventListener('click', go);
   input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+
+  /* the key is remembered - so the gate opens by itself next time */
+  if (input.value.trim()) setTimeout(go, 300);
 })();
 </script>
 </body>
 </html>`;
 
+const PANEL_ORIGIN = 'https://alalfi-panel.pages.dev';
+const PANEL_HOST = 'alalfi-panel.pages.dev';
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
+
+  /* On the public site this path only points to the panel's own origin,
+     so the home-screen app of the school site never contains the panel. */
+  if (url.hostname !== PANEL_HOST) {
+    const rest = url.pathname.replace(/^\/panel/, '') || '/';
+    const target = PANEL_ORIGIN + '/panel' + (rest === '/' ? '/' : rest) + url.search;
+    return html('', 302, { Location: target });
+  }
 
   /* static files inside /panel/ (the manifest, icons...) are served as they are */
   const parts = url.pathname.split('/').filter(Boolean);   // ['panel', '<key>']
