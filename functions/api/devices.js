@@ -1,14 +1,31 @@
 /**
  * GET  /api/devices  -> list all devices (superadmin session required)
- * POST /api/devices  -> actions (superadmin session required)
+ * POST /api/devices  -> actions
  *        body: { action: 'register', slug, deviceId, deviceInfo }
  *           -> { ok, status: 'active' | 'pending' | 'new' | 'other_account', code }
  *        body: { action: 'approve' | 'reject' | 'unbind', deviceId, userId }
+ *
+ * Security:
+ *  - the approve / reject / unbind actions are scoped to ONE user (never all
+ *    the rows that share the same device id)
+ *  - the unauthenticated "register" action is rate limited
+ *  - no account name is leaked to unauthenticated callers
  */
-import { json, corsHeaders, readJson, noDb, requireSession } from './_shared.js';
+import {
+  json, corsHeaders, readJson, noDb, requireSession,
+  limitHit, limitAdd, serverError,
+} from './_shared.js';
 
 export async function onRequestOptions(context) {
   return new Response(null, { status: 204, headers: corsHeaders(context.request) });
+}
+
+async function clientIp(request) {
+  try {
+    const ip = request.headers.get('CF-Connecting-IP');
+    if (ip) return ip;
+  } catch (e) { /* ignore */ }
+  return 'unknown';
 }
 
 /* ---------------- list ---------------- */
@@ -32,7 +49,7 @@ export async function onRequestGet(context) {
     ).all();
     return json({ ok: true, devices: results || [] }, 200, request);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+    return serverError(e, request);
   }
 }
 
@@ -51,6 +68,15 @@ export async function onRequestPost(context) {
     const deviceId = String(payload.deviceId || '').trim();
     const deviceInfo = String(payload.deviceInfo || '').trim();
     if (!slug || !deviceId) return json({ ok: false, error: 'missing slug/deviceId' }, 400, request);
+    if (deviceId.length > 128 || slug.length > 64) {
+      return json({ ok: false, error: 'invalid request' }, 400, request);
+    }
+
+    /* rate limit: 10 registrations per IP / 10 minutes */
+    const ip = await clientIp(request);
+    if (await limitHit(env, 'reg:' + ip, 10, 10)) {
+      return json({ ok: false, error: 'too_many_attempts' }, 429, request);
+    }
 
     try {
       const user = await env.ALALFI_DB.prepare(
@@ -58,16 +84,20 @@ export async function onRequestPost(context) {
       ).bind(slug).first();
       if (!user) return json({ ok: true, status: 'unknown' }, 200, request);
 
-      /* 1) a device belongs to ONE account only */
+      /* 1) a device belongs to ONE account only (no names are exposed)
+            the manager may use the same browser for his own superadmin accounts */
       const other = await env.ALALFI_DB.prepare(
-        `SELECT u.username, u.name FROM user_devices d JOIN users u ON u.id = d.user_id
+        `SELECT d.id, u.role FROM user_devices d JOIN users u ON u.id = d.user_id
           WHERE d.device_id = ? AND d.user_id != ? LIMIT 1`
       ).bind(deviceId, user.id).first();
       if (other) {
-        return json({
-          ok: true, status: 'other_account',
-          message: 'هذا الجهاز مرتبط بحساب آخر (' + (other.name || other.username) + ')',
-        }, 200, request);
+        const bothSuper = user.role === 'superadmin' && other.role === 'superadmin';
+        if (!bothSuper) {
+          return json({
+            ok: true, status: 'other_account',
+            message: 'هذا الجهاز مسجل على حساب آخر - كلّم مدير المدرسة',
+          }, 200, request);
+        }
       }
 
       /* 2) the recovery key (the publish key) activates this device right away */
@@ -103,6 +133,7 @@ export async function onRequestPost(context) {
           "UPDATE user_devices SET device_info = ?, status = CASE WHEN status='rejected' THEN 'pending' ELSE status END WHERE id = ?"
         ).bind(deviceInfo, bound.id).run();
         const code = (user.id * 1000 + bound.id) % 100000;
+        await limitAdd(env, 'reg:' + ip);
         return json({ ok: true, status: 'pending', code: code, username: user.username }, 200, request);
       }
 
@@ -124,9 +155,10 @@ export async function onRequestPost(context) {
       ).bind(user.id, deviceId, deviceInfo).run();
       const newId = (ins && ins.meta && ins.meta.last_row_id) || 0;
       const code = (user.id * 1000 + newId) % 100000;
+      await limitAdd(env, 'reg:' + ip);
       return json({ ok: true, status: 'new', code: code, first: total === 0, username: user.username }, 200, request);
     } catch (e) {
-      return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+      return serverError(e, request);
     }
   }
 
@@ -137,23 +169,34 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: 'superadmin only' }, 403, request);
   }
   if (!payload.deviceId) return json({ ok: false, error: 'deviceId required' }, 400, request);
-
-  const action = payload.action || 'approve';
+  const deviceId = String(payload.deviceId).trim();
+  const userId = parseInt(payload.userId || 0, 10);
 
   try {
-    if (action === 'unbind') {
-      await env.ALALFI_DB.prepare('DELETE FROM user_devices WHERE device_id = ?').bind(payload.deviceId).run();
-      if (payload.userId) {
-        await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(payload.userId).run();
+    if (payload.action === 'unbind') {
+      /* scoped to one account only */
+      if (userId > 0) {
+        await env.ALALFI_DB.prepare(
+          'DELETE FROM user_devices WHERE device_id = ? AND user_id = ?'
+        ).bind(deviceId, userId).run();
+        await env.ALALFI_DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+      } else {
+        await env.ALALFI_DB.prepare('DELETE FROM user_devices WHERE device_id = ?').bind(deviceId).run();
       }
       return json({ ok: true, action: 'unbound' }, 200, request);
     }
-    const status = action === 'reject' ? 'rejected' : 'active';
-    await env.ALALFI_DB.prepare(
-      "UPDATE user_devices SET status = ?, last_seen = datetime('now') WHERE device_id = ?"
-    ).bind(status, payload.deviceId).run();
-    return json({ ok: true, action: action, status: status }, 200, request);
+    const status = payload.action === 'reject' ? 'rejected' : 'active';
+    if (userId > 0) {
+      await env.ALALFI_DB.prepare(
+        "UPDATE user_devices SET status = ?, last_seen = datetime('now') WHERE device_id = ? AND user_id = ?"
+      ).bind(status, deviceId, userId).run();
+    } else {
+      await env.ALALFI_DB.prepare(
+        "UPDATE user_devices SET status = ?, last_seen = datetime('now') WHERE device_id = ?"
+      ).bind(status, deviceId).run();
+    }
+    return json({ ok: true, action: payload.action || 'approve', status: status }, 200, request);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+    return serverError(e, request);
   }
 }

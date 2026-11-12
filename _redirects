@@ -7,3 +7,7 @@
 /wrangler.toml            /  302
 /.gitignore               /  302
 /logo-original.png        /  302
+/db/*                    /  302
+/db                      /  302
+/schema.sql              /  302
+/seed-content.json       /  302

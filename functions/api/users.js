@@ -1,11 +1,17 @@
 /**
- * GET    /api/users      -> list users (valid session required)
+ * GET    /api/users      -> list users
+ *                          (superadmin sees everybody, a normal admin sees only
+ *                           himself - the personal links stay secret)
  * PUT    /api/users      -> create / update users (superadmin session required)
  * DELETE /api/users/:id  -> delete one user (superadmin session required)
  *
- * Passwords are hashed here, never stored in plain text, never returned.
+ * Passwords are hashed here (PBKDF2), never stored in plain text, never returned.
+ * Editing a user keeps the SAME id and the SAME personal link.
  */
-import { json, corsHeaders, readJson, noDb, requireSession, hashPassword, randomToken, safeJson } from './_shared.js';
+import {
+  json, corsHeaders, readJson, noDb, requireSession, hashPassword, randomToken,
+  safeJson, serverError,
+} from './_shared.js';
 
 export async function onRequestOptions(context) {
   return new Response(null, { status: 204, headers: corsHeaders(context.request) });
@@ -21,10 +27,13 @@ export async function onRequestGet(context) {
   if (auth.error) return auth.error;
 
   try {
+    /* a normal admin must not see the other accounts or their personal links */
+    const onlyMe = auth.user.role !== 'superadmin';
     const { results } = await env.ALALFI_DB.prepare(
       `SELECT id, username, slug, name, role, device, perms, last_device, last_login, is_active, created_at
-         FROM users ORDER BY id`
-    ).all();
+         FROM users ${onlyMe ? 'WHERE id = ?' : ''} ORDER BY id`
+    ).bind(...(onlyMe ? [auth.user.id] : [])).all();
+
     const users = (results || []).map((u) => ({
       id: u.id,
       username: u.username,
@@ -41,7 +50,7 @@ export async function onRequestGet(context) {
     }));
     return json({ ok: true, users: users }, 200, request);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+    return serverError(e, request);
   }
 }
 
@@ -60,24 +69,72 @@ export async function onRequestPut(context) {
   const payload = await readJson(request);
   if (!payload) return json({ ok: false, error: 'invalid json' }, 400, request);
   const list = Array.isArray(payload) ? payload : (payload.users || []);
+  if (!Array.isArray(list) || list.length > 50) {
+    return json({ ok: false, error: 'invalid payload' }, 400, request);
+  }
 
   try {
     for (const u of list) {
       if (!u || !u.username) continue;
-      const username = String(u.username).trim();
-      const existing = await env.ALALFI_DB.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE')
-        .bind(username).first();
+      const username = String(u.username).trim().slice(0, 64);
+      if (!username) continue;
+
+      /* find the EXISTING row by id first, then by username */
+      let existing = null;
+      const wantedId = parseInt(u.id || 0, 10);
+      if (wantedId > 0) {
+        existing = await env.ALALFI_DB.prepare('SELECT id, slug, username FROM users WHERE id = ?')
+          .bind(wantedId).first();
+      }
+      if (!existing) {
+        existing = await env.ALALFI_DB.prepare('SELECT id, slug, username FROM users WHERE username = ? COLLATE NOCASE')
+          .bind(username).first();
+      }
 
       const perms = JSON.stringify(u.perms || {});
       const role = u.role === 'superadmin' ? 'superadmin' : 'admin';
-      const slug = String(u.slug || '').trim().toLowerCase()
+
+      /* the personal link stays the same unless the superadmin typed a new one */
+      let slug = String(u.slug || '').trim().toLowerCase()
         .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || null;
+      const autoSlug = username.toLowerCase().replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/^-+|-+$/g, '').slice(0, 40) || null;
+
+      if (existing) {
+        const touched = u.slugTouched === true;
+        const old = existing.slug || null;
+        if (!touched) {
+          /* the client did not touch the field -> keep the personal link.
+             (an old client that sends the auto-generated slug is ignored too) */
+          const looksAuto = !slug || slug === autoSlug;
+          if (old && (u.slugTouched === false || looksAuto)) slug = old;
+        }
+      }
+      if (!slug) slug = existing ? (existing.slug || autoSlug) : autoSlug;
+
+      /* the slug must be unique */
+      if (slug) {
+        const taken = await env.ALALFI_DB.prepare(
+          'SELECT id FROM users WHERE slug = ? COLLATE NOCASE AND id != ? LIMIT 1'
+        ).bind(slug, existing ? existing.id : 0).first();
+        if (taken) {
+          return json({ ok: false, error: 'الرابط الشخصي مستخدم من قبل - اختار رابط تاني' }, 409, request);
+        }
+      }
+
+      /* the username must be unique */
+      const nameTaken = await env.ALALFI_DB.prepare(
+        'SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id != ? LIMIT 1'
+      ).bind(username, existing ? existing.id : 0).first();
+      if (nameTaken) {
+        return json({ ok: false, error: 'اسم المستخدم مستخدم من قبل' }, 409, request);
+      }
 
       if (existing) {
         await env.ALALFI_DB.prepare(
-          `UPDATE users SET name = ?, role = ?, device = ?, perms = ?, slug = ?, updated_at = datetime('now')
+          `UPDATE users SET username = ?, name = ?, role = ?, device = ?, perms = ?, slug = ?, updated_at = datetime('now')
             WHERE id = ?`
-        ).bind(u.name || '', role, u.device || '', perms, slug, existing.id).run();
+        ).bind(username, u.name || '', role, u.device || '', perms, slug, existing.id).run();
 
         if (u.password) {
           const salt = randomToken(16);
@@ -105,7 +162,7 @@ export async function onRequestPut(context) {
 
     return json({ ok: true, savedAt: new Date().toISOString() }, 200, request);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+    return serverError(e, request);
   }
 }
 
@@ -155,6 +212,6 @@ export async function onRequestDelete(context) {
     ).bind(auth.user.id, String(target.username)).run();
     return json({ ok: true, deleted: id }, 200, request);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+    return serverError(e, request);
   }
 }

@@ -23,6 +23,10 @@ EXCLUDE_NAMES = {
     ".gitignore", "deploy.bat", "deploy_cloudflare.py", "deploy_github.py",
     "ensure_cloudflare.py", "make_pptx.py", "seed_db.py", "wrangler.toml",
     "logo-original.png",
+    # never publish the database schema / seed data
+    "db", "schema.sql", "seed-content.json", "schema-login.sql",
+    # the Pages Functions are uploaded separately (see stage()), never as static files
+    "functions",
 }
 EXCLUDE_EXT = {".pyc", ".log", ".tmp", ".zip", ".bak"}
 

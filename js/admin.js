@@ -181,6 +181,12 @@ function suggestSlug(username) {
   const latin = u.replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return latin;
 }
+/* the superadmin typed in the slug field -> the personal link may change */
+function markSlugTouched(value) {
+  const v = String(value || '').trim();
+  if (v && v !== (window.__origSlug || '')) window.__slugTouched = true;
+  previewSlug(value);
+}
 function copyText(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -404,6 +410,18 @@ function doLogin() {
           const box = document.getElementById('recoveryBox');
           if (box) box.style.display = 'block';
           toast('هذا الجهاز غير مفعّل - أدخل رمز الاسترداد أو اطلب موافقة المدير العام', true);
+          return;
+        }
+        if (res && res.error === 'device_other_account') {
+          toast('هذا الجهاز مسجل على حساب آخر - كلّم مدير المدرسة', true);
+          return;
+        }
+        if (res && res.error === 'too_many_attempts') {
+          toast('محاولات كتير غلط - استنى 10 دقايق وجرب تاني', true);
+          return;
+        }
+        if (res && res.error === 'device_required') {
+          toast('مفيش تعريف للجهاز - افتح الموقع من نفس المتصفح تاني', true);
           return;
         }
         toast('اسم المستخدم أو كلمة المرور غير صحيحة', true);
@@ -1382,6 +1400,10 @@ function renderUsers(c) {
 function userForm(u) {
   const isSuper = u && u.role === 'superadmin';
   const perms = (u && u.perms) ? u.perms : defaultPerms();
+  const originalSlug = (u && u.slug) ? u.slug : '';
+  /* the personal link only changes if the superadmin types a new one */
+  window.__slugTouched = false;
+  window.__origSlug = originalSlug;
   const permRows = sections.filter(s => s.id !== 'account' && s.id !== 'users').map(s => {
     const cur = perms[s.id] || 'none';
     const opts = PERM_LEVELS.map(pl => `
@@ -1400,8 +1422,10 @@ function userForm(u) {
     <div class="form-grid">
       <div class="form-group"><label>اسم المستخدم</label><input id="f_username" value="${esc(u?.username)}" ${u ? '' : 'oninput="autoSlug()"'}></div>
       <div class="form-group"><label>الاسم</label><input id="f_name" value="${esc(u?.name)}"></div>
-      <div class="form-group"><label>الرابط الشخصي (slug)</label><input id="f_slug" value="${esc(u?.slug || '')}" placeholder="ahmed" oninput="previewSlug(this.value)" onblur="fixSlugField()">
-        <small style="font-size:11px;color:var(--ad-muted);">الرابط: <span id="slugPreview">${esc(personalUrl(u?.slug || 'ahmed'))}</span></small>
+      <input type="hidden" id="f_id" value="${esc(u?.id || 0)}">
+      <div class="form-group"><label>الرابط الشخصي (slug)</label><input id="f_slug" value="${esc(originalSlug)}" placeholder="ahmed" oninput="markSlugTouched(this.value)" onblur="fixSlugField()">
+        <small style="font-size:11px;color:var(--ad-muted);">الرابط: <span id="slugPreview">${esc(personalUrl(originalSlug || 'ahmed'))}</span></small>
+        ${u ? '<small style="font-size:11px;color:#f0d68a;display:block;margin-top:4px;">الرابط بيفضل زي ما هو إلا لو غيّرته انت.</small>' : ''}
       </div>
       <div class="form-group"><label>الجهاز / الجهاز المخصص</label><input id="f_device" value="${esc(u?.device || '')}" placeholder="مثال: مكتب 1 - الدور الثالث"></div>
       <div class="form-group"><label>كلمة المرور</label><input id="f_password" type="password" value="${esc(u?.password)}"></div>
@@ -1440,6 +1464,8 @@ function saveUser(id) {
   if (!username) { toast('اسم المستخدم مطلوب', true); return; }
   const role = document.getElementById('f_role').value;
   const password = document.getElementById('f_password').value;
+  const idField = document.getElementById('f_id');
+  const realId = idField ? parseInt(idField.value || 0, 10) : (id || 0);
 
   // collect permissions
   const perms = {};
@@ -1455,11 +1481,23 @@ function saveUser(id) {
 
   const deviceField = document.getElementById('f_device');
   const slugField = document.getElementById('f_slug');
+  const target = realId ? data.users.find(u => u.id === realId) : null;
+
+  /* the personal link NEVER changes unless the superadmin typed a new one */
   let slugVal = slugField ? cleanSlug(slugField.value) : '';
-  if (!slugVal) slugVal = suggestSlug(username);
+  let slugTouched = !!window.__slugTouched;
+  if (target) {
+    if (!slugTouched) slugVal = target.slug || (window.__origSlug || '');
+    else if (!slugVal) slugVal = target.slug || (window.__origSlug || '');
+  } else if (!slugVal) {
+    slugVal = suggestSlug(username);
+  }
+
   const obj = {
+    id: realId || 0,
     username,
     slug: slugVal,
+    slugTouched: slugTouched,
     name: document.getElementById('f_name').value.trim(),
     role,
     perms,
@@ -1467,7 +1505,6 @@ function saveUser(id) {
   };
   if (password) obj.password = password;      // only sent when typed
 
-  const target = id ? data.users.find(u => u.id === id) : null;
   if (target) {
     if (target.role === 'superadmin' && role !== 'superadmin' && !confirm('أنت بتقلّل صلاحيات المدير العام. متأكد؟')) return;
     obj.id = target.id;
@@ -1990,6 +2027,7 @@ function pullGlobal(silent) {
         if (remoteUsers && remoteUsers.length) {
           merged.users = remoteUsers.map(u => ({
             id: u.id, username: u.username, name: u.name, role: u.role,
+            slug: u.slug || '',                       // the personal link - NEVER dropped
             device: u.device, perms: u.perms || {},
             lastDevice: u.last_device || '', lastLogin: u.last_login || '',
             password: '',            // passwords never leave the server

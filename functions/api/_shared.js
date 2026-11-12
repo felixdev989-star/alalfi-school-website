@@ -1,6 +1,13 @@
 /**
  * Shared helpers - AlAlfi school API (Cloudflare Pages Functions)
  * Storage: D1 (SQLite) for users, sessions and content.
+ *
+ * Security notes:
+ *  - passwords: PBKDF2-HMAC-SHA256 (120k rounds) with a per-user random salt.
+ *    Old SHA-256 hashes are still VERIFIED (so nobody loses access) and are
+ *    silently upgraded to PBKDF2 on the next successful login.
+ *  - sessions: 64 hex random characters, stored server side, 8h expiry.
+ *  - every 500 response hides the internal error message.
  */
 
 export const ALLOWED_ORIGINS = ['https://alalfi-school.pages.dev'];
@@ -9,6 +16,7 @@ export const CONTENT_KEYS = [
   'settings', 'about', 'news', 'events', 'programs',
   'gallery', 'staff', 'leaders', 'media',
 ];
+export const PBKDF2_ITERATIONS = 100000;   // Cloudflare WebCrypto max is 100000
 
 export function corsHeaders(request) {
   const origin = request.headers.get('Origin');
@@ -32,10 +40,29 @@ export function json(body, status, request) {
   });
 }
 
+/** never leak the internal exception to the client */
+export function serverError(e, request, extra) {
+  try { console.error('API error:', (e && e.stack) || e); } catch (x) { /* ignore */ }
+  return json({ ok: false, error: 'خطأ في الخادم - حاول تاني', ...(extra || {}) }, 500, request);
+}
+
 export function randomToken(bytes = 32) {
   const arr = new Uint8Array(bytes);
   crypto.getRandomValues(arr);
   return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function bytesToHex(bytes) {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) hex += (bytes[i] & 0xff).toString(16).padStart(2, '0');
+  return hex;
+}
+
+export function hexToBytes(hex) {
+  const s = String(hex || '').trim();
+  const out = new Uint8Array(Math.floor(s.length / 2));
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16) || 0;
+  return out;
 }
 
 export function sha256Hex(text) {
@@ -44,16 +71,104 @@ export function sha256Hex(text) {
     const view = (res && res.buffer && !(res instanceof ArrayBuffer))
       ? new Uint8Array(res.buffer)
       : new Uint8Array(res);
-    let hex = '';
-    for (let i = 0; i < view.length; i++) hex += (view[i] & 0xff).toString(16).padStart(2, '0');
-    return hex;
+    return bytesToHex(view);
   });
 }
 
-/** hash = sha256(salt + '::' + password) */
-export function hashPassword(password, salt) {
-  return sha256Hex(salt + '::' + password);
+/** compare two hex strings without leaking the position of the difference */
+export function timingSafeEqual(a, b) {
+  const x = String(a == null ? '' : a);
+  const y = String(b == null ? '' : b);
+  let diff = x.length ^ y.length;
+  const len = Math.max(x.length, y.length);
+  for (let i = 0; i < len; i++) {
+    diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  }
+  return diff === 0;
 }
+
+/* ---------------- password hashing ---------------- */
+
+export async function pbkdf2Hash(password, saltHex, iterations = PBKDF2_ITERATIONS) {
+  const salt = hexToBytes(saltHex);
+  const base = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(String(password)), 'PBKDF2', false, ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: salt, iterations: iterations, hash: 'SHA-256' }, base, 256
+  );
+  return bytesToHex(new Uint8Array(bits));
+}
+
+/**
+ * Hash a NEW password -> "pbkdf2$<rounds>$<salt>$<hash>"
+ */
+export async function hashPassword(password, salt) {
+  const h = await pbkdf2Hash(password, salt);
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${salt}$${h}`;
+}
+
+/**
+ * Verify a password against the stored hash.
+ * Supports the new PBKDF2 format AND the legacy sha256(salt + '::' + password).
+ * Returns { ok, upgrade } - upgrade holds the new hash when the old format was used.
+ */
+export async function verifyPassword(password, storedHash, salt) {
+  const pwd = String(password == null ? '' : password);
+  const stored = String(storedHash || '');
+  if (stored.startsWith('pbkdf2$')) {
+    const parts = stored.split('$');
+    const iterations = parseInt(parts[1], 10) || PBKDF2_ITERATIONS;
+    const s = parts[2] || salt || '';
+    const expected = parts[3] || '';
+    const got = await pbkdf2Hash(pwd, s, iterations);
+    return { ok: timingSafeEqual(got, expected), upgrade: null };
+  }
+  /* legacy sha256 */
+  const got = await sha256Hex((salt || '') + '::' + pwd);
+  const ok = timingSafeEqual(got, stored);
+  if (!ok) return { ok: false, upgrade: null };
+  const newSalt = randomToken(16);
+  const newHash = await pbkdf2Hash(pwd, newSalt);
+  return {
+    ok: true,
+    upgrade: { salt: newSalt, hash: `pbkdf2$${PBKDF2_ITERATIONS}$${newSalt}$${newHash}` },
+  };
+}
+
+/* ---------------- generic rate limiting ---------------- */
+
+export async function limitHit(env, key, max, minutes) {
+  try {
+    const row = await env.ALALFI_DB.prepare(
+      'SELECT attempts, last_try FROM login_attempts WHERE ip = ?'
+    ).bind(key).first();
+    if (!row) return false;
+    const last = new Date(String(row.last_try).replace(' ', 'T') + 'Z').getTime();
+    const mins = (Date.now() - last) / 60000;
+    if (mins > minutes) return false;          // the old attempt expired
+    return (row.attempts || 0) >= max;
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function limitAdd(env, key) {
+  try {
+    await env.ALALFI_DB.prepare(
+      `INSERT INTO login_attempts (ip, attempts, last_try) VALUES (?, 1, datetime('now'))
+       ON CONFLICT(ip) DO UPDATE SET attempts = attempts + 1, last_try = datetime('now')`
+    ).bind(key).run();
+  } catch (e) { /* ignore */ }
+}
+
+export async function limitClear(env, key) {
+  try {
+    await env.ALALFI_DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(key).run();
+  } catch (e) { /* ignore */ }
+}
+
+/* ---------------- request helpers ---------------- */
 
 export async function readJson(request) {
   try { return await request.json(); } catch (e) { return null; }
@@ -84,7 +199,7 @@ export async function getSessionUser(env, request) {
 
 export async function requireSession(env, request) {
   const u = await getSessionUser(env, request);
-  if (!u) return { error: json({ ok: false, error: 'session expired - please log in again' }, 401, request) };
+  if (!u) return { error: json({ ok: false, error: 'انتهت الجلسة - سجل دخول تاني' }, 401, request) };
   return { user: u };
 }
 

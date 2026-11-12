@@ -1,13 +1,21 @@
 /**
- * POST /api/login    -> verify credentials, create a server-side session
+ * POST /api/login    -> verify credentials + device, create a server-side session
  * POST /api/logout   -> destroy the session
  * GET  /api/session  -> check if the current session is still valid
  *
  * The plaintext password never leaves the request body and is never stored.
+ *
+ * Security:
+ *  - a device id is MANDATORY (otherwise the device lock could be bypassed)
+ *  - a device can belong to ONE account only
+ *  - brute force protection: 8 tries / 10 min per IP + 20 tries / 10 min per account
+ *  - unknown user and wrong password return the same message (no user enumeration)
+ *  - the password is verified with PBKDF2 (old SHA-256 hashes are upgraded on login)
  */
 import {
-  json, corsHeaders, readJson, noDb, hashPassword, randomToken,
+  json, corsHeaders, readJson, noDb, verifyPassword, randomToken,
   SESSION_HOURS, publicUser, getSessionUser,
+  limitHit, limitAdd, limitClear, serverError,
 } from './_shared.js';
 
 export async function onRequestOptions(context) {
@@ -21,6 +29,19 @@ export async function onRequestGet(context) {
   const u = await getSessionUser(env, request);
   if (!u) return json({ ok: false, authenticated: false }, 401, request);
   return json({ ok: true, authenticated: true, user: publicUser(u) }, 200, request);
+}
+
+/* ---------- brute force protection ---------- */
+const MAX_ATTEMPTS_IP = 8;
+const MAX_ATTEMPTS_USER = 20;
+const LOCK_MINUTES = 10;
+
+async function clientIp(request) {
+  try {
+    const ip = request.headers.get('CF-Connecting-IP');
+    if (ip) return ip;
+  } catch (e) { /* ignore */ }
+  return 'unknown';
 }
 
 export async function onRequestPost(context) {
@@ -46,22 +67,47 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: 'missing credentials' }, 400, request);
   }
 
+  const username = String(payload.username).trim();
+  const password = String(payload.password);
+  const ip = await clientIp(request);
+
+  /* rate limit: per IP + per account */
+  if (await limitHit(env, 'ip:' + ip, MAX_ATTEMPTS_IP, LOCK_MINUTES)) {
+    return json({ ok: false, error: 'too_many_attempts' }, 429, request);
+  }
+  const userKey = 'user:' + username.toLowerCase();
+  if (await limitHit(env, userKey, MAX_ATTEMPTS_USER, LOCK_MINUTES)) {
+    return json({ ok: false, error: 'too_many_attempts' }, 429, request);
+  }
+
   try {
     const user = await env.ALALFI_DB.prepare(
       'SELECT id, username, name, role, device, perms, password_hash, salt, last_device, last_login, is_active FROM users WHERE username = ? COLLATE NOCASE'
-    ).bind(String(payload.username).trim()).first();
+    ).bind(username).first();
 
     if (!user || !user.is_active) {
-      // same message for unknown user and wrong password (no user enumeration)
+      /* hash something anyway so a missing user and a wrong password take the same time */
+      await verifyPassword(password, `pbkdf2$100000$${'00'.repeat(16)}${'00'.repeat(32)}`, '00'.repeat(16));
+      await limitAdd(env, 'ip:' + ip);
+      await limitAdd(env, userKey);
       return json({ ok: false, error: 'invalid credentials' }, 401, request);
     }
 
-    const h = await hashPassword(payload.password, user.salt);
-    if (h !== user.password_hash) {
+    const check = await verifyPassword(password, user.password_hash, user.salt);
+    if (!check.ok) {
       await env.ALALFI_DB.prepare(
         `INSERT INTO audit_log (user_id, action, detail) VALUES (?, 'login_failed', ?)`
       ).bind(user.id, String(payload.device || '')).run();
+      await limitAdd(env, 'ip:' + ip);
+      await limitAdd(env, userKey);
       return json({ ok: false, error: 'invalid credentials' }, 401, request);
+    }
+
+    /* upgrade an old SHA-256 hash to PBKDF2 (transparent for the user) */
+    if (check.upgrade) {
+      await env.ALALFI_DB.prepare(
+        "UPDATE users SET password_hash = ?, salt = ?, updated_at = datetime('now') WHERE id = ?"
+      ).bind(check.upgrade.hash, check.upgrade.salt, user.id).run();
     }
 
     // ---- device check: every account is bound to approved devices only ----
@@ -70,52 +116,69 @@ export async function onRequestPost(context) {
     const recoveryKey = String(payload.recoveryKey || '').trim();
     const isRecovery = !!(env.EDIT_TOKEN && recoveryKey && recoveryKey === env.EDIT_TOKEN);
 
-    if (deviceId) {
-      const bound = await env.ALALFI_DB.prepare(
-        "SELECT id, status FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1"
-      ).bind(user.id, deviceId).first();
+    /* the device id is mandatory - without it the device lock is useless */
+    if (!deviceId) {
+      return json({ ok: false, error: 'device_required' }, 400, request);
+    }
+    if (deviceId.length > 128) {
+      return json({ ok: false, error: 'device_required' }, 400, request);
+    }
 
-      if (bound && bound.status !== 'active' && !isRecovery) {
+    /* a device belongs to ONE account only
+       (the manager may use the same browser for his own superadmin accounts) */
+    const otherAccount = await env.ALALFI_DB.prepare(
+      `SELECT d.id, u.role FROM user_devices d JOIN users u ON u.id = d.user_id
+        WHERE d.device_id = ? AND d.user_id != ? LIMIT 1`
+    ).bind(deviceId, user.id).first();
+    if (otherAccount && !isRecovery) {
+      const bothSuper = user.role === 'superadmin' && otherAccount.role === 'superadmin';
+      if (!bothSuper) {
+        return json({ ok: false, error: 'device_other_account' }, 403, request);
+      }
+    }
+
+    const bound = await env.ALALFI_DB.prepare(
+      "SELECT id, status FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1"
+    ).bind(user.id, deviceId).first();
+
+    if (bound && bound.status !== 'active' && !isRecovery) {
+      return json({
+        ok: false,
+        error: 'device_pending',
+        recoveryAllowed: !!env.EDIT_TOKEN,
+      }, 403, request);
+    }
+    if (!bound) {
+      const total = (await env.ALALFI_DB.prepare(
+        'SELECT COUNT(*) AS c FROM user_devices WHERE user_id = ?'
+      ).bind(user.id).first()).c || 0;
+      if (!isRecovery && !(user.role === 'superadmin' && total === 0)) {
+        // unknown device -> needs the superadmin's approval first
+        await env.ALALFI_DB.prepare(
+          `INSERT INTO user_devices (user_id, device_id, device_info, status)
+           VALUES (?, ?, ?, 'pending')
+           ON CONFLICT(user_id, device_id) DO UPDATE SET device_info = excluded.device_info`
+        ).bind(user.id, deviceId, deviceInfo).run();
         return json({
           ok: false,
           error: 'device_pending',
           recoveryAllowed: !!env.EDIT_TOKEN,
         }, 403, request);
       }
-      if (!bound) {
-        const total = (await env.ALALFI_DB.prepare(
-          'SELECT COUNT(*) AS c FROM user_devices WHERE user_id = ?'
-        ).bind(user.id).first()).c || 0;
-        if (!isRecovery && !(user.role === 'superadmin' && total === 0)) {
-          // unknown device -> needs approval first
-          await env.ALALFI_DB.prepare(
-            `INSERT INTO user_devices (user_id, device_id, device_info, status)
-             VALUES (?, ?, ?, 'pending')
-             ON CONFLICT(user_id, device_id) DO UPDATE SET device_info = excluded.device_info`
-          ).bind(user.id, deviceId, deviceInfo).run();
-          return json({
-            ok: false,
-            error: 'device_pending',
-            recoveryAllowed: !!env.EDIT_TOKEN,
-          }, 403, request);
-        }
-        // recovery key (or the superadmin's first device) -> bind right away
-        await env.ALALFI_DB.prepare(
-          `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
-           VALUES (?, ?, ?, 'active', datetime('now'))
-           ON CONFLICT(user_id, device_id) DO UPDATE SET status='active', device_info=excluded.device_info, last_seen=datetime('now')`
-        ).bind(user.id, deviceId, deviceInfo).run();
-      } else {
-        if (isRecovery && bound.status !== 'active') {
-          await env.ALALFI_DB.prepare(
-            "UPDATE user_devices SET status='active', last_seen = datetime('now') WHERE id = ?"
-          ).bind(bound.id).run();
-        } else {
-          await env.ALALFI_DB.prepare(
-            "UPDATE user_devices SET device_info = ?, last_seen = datetime('now') WHERE id = ?"
-          ).bind(deviceInfo, bound.id).run();
-        }
-      }
+      // recovery key (or the superadmin's first device) -> bind right away
+      await env.ALALFI_DB.prepare(
+        `INSERT INTO user_devices (user_id, device_id, device_info, status, last_seen)
+         VALUES (?, ?, ?, 'active', datetime('now'))
+         ON CONFLICT(user_id, device_id) DO UPDATE SET status='active', device_info=excluded.device_info, last_seen=datetime('now')`
+      ).bind(user.id, deviceId, deviceInfo).run();
+    } else if (isRecovery && bound.status !== 'active') {
+      await env.ALALFI_DB.prepare(
+        "UPDATE user_devices SET status='active', last_seen = datetime('now') WHERE id = ?"
+      ).bind(bound.id).run();
+    } else {
+      await env.ALALFI_DB.prepare(
+        "UPDATE user_devices SET device_info = ?, last_seen = datetime('now') WHERE id = ?"
+      ).bind(deviceInfo, bound.id).run();
     }
 
     // create a server-side session
@@ -136,6 +199,8 @@ export async function onRequestPost(context) {
 
     // clean up expired sessions
     await env.ALALFI_DB.prepare(`DELETE FROM sessions WHERE expires_at <= datetime('now')`).run();
+    await limitClear(env, 'ip:' + ip);
+    await limitClear(env, userKey);
 
     return json({
       ok: true,
@@ -148,6 +213,6 @@ export async function onRequestPost(context) {
       }),
     }, 200, request);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500, request);
+    return serverError(e, request);
   }
 }

@@ -52,7 +52,7 @@ export async function onRequestGet(context) {
   if (!deviceId) deviceId = randId();
 
   const cookie = fresh
-    ? `${DEVICE_COOKIE}=${deviceId}; Path=/; Max-Age=31536000; SameSite=Lax`
+    ? `${DEVICE_COOKIE}=${deviceId}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`
     : null;
 
   return redirectTo(

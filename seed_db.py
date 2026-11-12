@@ -52,7 +52,11 @@ def migrate():
 
 
 def main():
-    password = sys.argv[1] if len(sys.argv) > 1 else "Alalfi@2026#Secure"
+    if len(sys.argv) < 2:
+        print("Usage: python seed_db.py <PASSWORD> [username] [name] [slug]")
+        print("  (no default password - always give your own)")
+        sys.exit(1)
+    password = sys.argv[1]
     username = sys.argv[2] if len(sys.argv) > 2 else "admin"
     name = sys.argv[3] if len(sys.argv) > 3 else "المدير العام"
     slug = sys.argv[4] if len(sys.argv) > 4 else "admin"
@@ -63,7 +67,9 @@ def main():
     migrate()
 
     salt = secrets.token_hex(16)
-    h = hashlib.sha256((salt + "::" + password).encode()).hexdigest()
+    # PBKDF2-HMAC-SHA256 (120k rounds) - same format the server verifies
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 100000)
+    h = f"pbkdf2$100000${salt}${dk.hex()}"
 
     print(f"==> creating superadmin '{username}' (slug: {slug})")
     d1("DELETE FROM sessions;")
