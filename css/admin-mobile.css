@@ -1,0 +1,198 @@
+/* =========================================================
+   Mobile polish for the admin panel
+   - the modals become bottom sheets
+   - comfortable tap targets (40px+)
+   - the inputs are 16px (iOS does not zoom on focus)
+   - the charts never overflow
+   - the safe areas (the notch / the home indicator) are respected
+   ========================================================= */
+@media (max-width: 720px) {
+
+  /* ---------- the topbar ---------- */
+  .topbar {
+    padding: 10px 12px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    min-height: 58px;
+    gap: 8px;
+  }
+  .topbar .icon-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 15px;
+    border-radius: 12px;
+  }
+  .topbar .company-select {
+    min-height: 38px;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+  .topbar h2#pageTitle { font-size: 15px !important; }
+  .menu-toggle {
+    width: 42px !important;
+    height: 42px !important;
+    font-size: 20px;
+  }
+
+  /* ---------- the sidebar ---------- */
+  .sidebar { width: 286px; }
+  .sidebar .nav-item,
+  .sidebar a,
+  .sidebar button {
+    min-height: 46px;
+    font-size: 14px;
+  }
+  .sidebar .brand h1 { font-size: 15px; }
+  .sidebar .brand small { font-size: 11px; }
+
+  /* ---------- the content ---------- */
+  .content { padding: 16px 14px calc(28px + env(safe-area-inset-bottom)); }
+  .section-head { flex-wrap: wrap; gap: 10px; }
+  .section-head h3 { font-size: 18px; }
+  .search-box input { font-size: 16px; height: 44px; }
+
+  /* ---------- the stat cards ---------- */
+  .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .card { padding: 14px; }
+  .card .label { font-size: 11.5px; }
+  .card .value { font-size: 26px; }
+  .card .sub { font-size: 11px; }
+
+  /* ---------- the charts never overflow ---------- */
+  .chart-card { padding: 14px; overflow: hidden; }
+  .chart-card h3 { font-size: 14px; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+  .chart-wrap { width: 100%; max-width: 100%; height: 210px; overflow: hidden; }
+  .chart-wrap canvas { max-width: 100% !important; max-height: 100% !important; }
+
+  /* ---------- the modals become bottom sheets ---------- */
+  .modal-backdrop {
+    padding: 0;
+    align-items: flex-end;
+    background: rgba(6, 13, 26, .78);
+  }
+  .modal {
+    width: 100%;
+    max-width: none;
+    max-height: 93vh;
+    border-radius: 22px 22px 0 0;
+    padding: 20px 16px calc(18px + env(safe-area-inset-bottom));
+    animation: sheetUp .28s cubic-bezier(.2, .8, .2, 1);
+    border-bottom: none;
+  }
+  @keyframes sheetUp {
+    from { transform: translateY(34px); opacity: .5; }
+    to { transform: none; opacity: 1; }
+  }
+  .modal h3 { font-size: 20px; margin-bottom: 14px; }
+  .modal .footer {
+    position: sticky;
+    bottom: calc(-18px - env(safe-area-inset-bottom));
+    margin: 16px -16px calc(-18px - env(safe-area-inset-bottom));
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+    background: var(--ad-card);
+    border-top: 1px solid var(--ad-line);
+    border-radius: 0;
+  }
+  .modal .footer .btn { flex: 1; min-height: 44px; font-size: 15px; }
+
+  /* ---------- the forms ---------- */
+  .form-grid { grid-template-columns: 1fr; gap: 13px; }
+  .form-group label { font-size: 12.5px; }
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    /* 16px stops iOS from zooming when the field is focused */
+    font-size: 16px;
+    padding: 12px 13px;
+    min-height: 46px;
+  }
+  .form-group textarea { min-height: 110px; }
+
+  /* ---------- every button is easy to tap ---------- */
+  .content .btn,
+  .content .btn-sm,
+  .modal .btn,
+  .modal .btn-sm,
+  .table-wrap tbody td button,
+  .table-wrap tbody td a.btn {
+    min-height: 42px;
+    padding: 9px 13px;
+    font-size: 13px;
+  }
+  .content .btn-sm { padding: 8px 12px; }
+  .media-add .btn { min-height: 42px; }
+
+  /* ---------- the tables (cards) ---------- */
+  .table-wrap tbody tr { padding: 12px 13px; }
+  .table-wrap tbody td { font-size: 13.5px; padding: 10px 0; }
+  .table-wrap tbody td::before { font-size: 11.5px; }
+  .table-wrap tbody td .ulink-input { font-size: 13px !important; }
+
+  /* ---------- the media editor ---------- */
+  .media-row { padding: 10px; gap: 8px; }
+  .media-thumb { width: 52px; height: 40px; }
+  .media-info input { font-size: 16px !important; padding: 10px; min-height: 42px; }
+  .media-add .media-url { flex: 1 1 100%; }
+  .media-add select, .media-add input { font-size: 16px !important; min-height: 42px; }
+  .media-del { min-height: 38px; width: 38px; padding: 0; }
+
+  /* ---------- the toast ---------- */
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    max-width: none;
+    font-size: 13.5px;
+    padding: 13px 16px;
+  }
+
+  /* ---------- no tiny text anywhere ---------- */
+  .sidebar .brand small,
+  .sidebar .foot .user-chip .rl,
+  .sidebar .foot .user-chip .nm,
+  .sidebar .foot div,
+  .sidebar .foot span,
+  .card .sub,
+  .chart-card h3 .badge,
+  .table-wrap tbody td span,
+  .modal div[style*="font-size:10px"],
+  .modal span[style*="font-size:10px"],
+  .modal small[style*="font-size:10px"] {
+    font-size: 11.5px !important;
+  }
+  .modal div[style*="font-size:10px"],
+  .modal span[style*="font-size:10px"] { line-height: 1.7; }
+}
+
+/* the very small screens */
+@media (max-width: 360px) {
+  .cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .card { padding: 12px 11px; }
+  .card .value { font-size: 23px; }
+  .card .label { font-size: 11px; }
+  .chart-wrap { height: 190px; }
+  .content { padding: 14px 11px calc(26px + env(safe-area-inset-bottom)); }
+  .topbar { padding-left: 9px; padding-right: 9px; gap: 6px; }
+  .topbar .company-select { font-size: 11px; padding: 6px 8px; }
+}
+
+/* ===== the file picker (an Arabic button instead of the native one) ===== */
+input[type="file"].file-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.file-pick {
+  margin-top: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.file-pick.has-file {
+  border-color: var(--ad-gold);
+  color: var(--ad-gold);
+}

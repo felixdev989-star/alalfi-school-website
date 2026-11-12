@@ -136,7 +136,8 @@ const GATE = `<!DOCTYPE html>
       var j = await r.json();
       if (j && j.ok) {
         localStorage.setItem('alalfi_panel_key', key);
-        location.href = '/panel/';
+        /* keep the query (u / link / did) so the personal link still works */
+        location.href = '/panel/' + (location.search || '');
       } else {
         fail((j && j.error) || 'المفتاح غير صحيح');
       }

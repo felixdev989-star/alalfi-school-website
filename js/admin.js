@@ -837,6 +837,9 @@ function renderDashboard(c) {
 
 
 function initDashboardCharts() {
+  /* on a phone the legend goes to the bottom so the chart stays readable */
+  const small = window.matchMedia('(max-width: 720px)').matches;
+  const legendPos = small ? 'bottom' : 'right';
   const turquoise = '#2dd4bf';
   const orange = '#f97316';
   const blue = '#3b82f6';
@@ -894,7 +897,7 @@ function initDashboardCharts() {
           backgroundColor: [turquoise, orange, blue, purple, '#ec4899'], borderWidth: 0, hoverOffset: 6 }]
       },
       options: { responsive: true, maintainAspectRatio: false, cutout: '70%',
-        plugins: { legend: { position: 'right', labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 10 } } } }
+        plugins: { legend: { position: legendPos, labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 10 } } } }
     });
   }
 
@@ -911,7 +914,7 @@ function initDashboardCharts() {
           backgroundColor: [turquoise, orange, blue, purple], borderWidth: 0, hoverOffset: 6 }]
       },
       options: { responsive: true, maintainAspectRatio: false, cutout: '70%',
-        plugins: { legend: { position: 'right', labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 10 } } } }
+        plugins: { legend: { position: legendPos, labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 10 } } } }
     });
   }
 
@@ -928,7 +931,7 @@ function initDashboardCharts() {
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#8a93a6', font: { size: 11 } } } },
+        plugins: { legend: { position: legendPos, labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 8 } } },
         scales: {
           x: { grid: { display: false }, ticks: { color: '#8a93a6', font: { size: 10 }, maxRotation: 45 } },
           y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 10 }, precision: 0 } },
@@ -951,7 +954,7 @@ function initDashboardCharts() {
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#8a93a6', font: { size: 11 } } } },
+        plugins: { legend: { position: legendPos, labels: { color: '#8a93a6', font: { size: 11 }, boxWidth: 12, padding: 8 } } },
         scales: {
           x: { grid: { display: false }, ticks: { color: '#8a93a6', font: { size: 10 } } },
           y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8a93a6', font: { size: 10 }, precision: 0 } },
@@ -2047,6 +2050,29 @@ function openModal(html) {
   const m = document.getElementById('modal');
   if (m) m.innerHTML = html;
   back.classList.add('show');
+  styleFileInputs(m);
+}
+
+/* The native file picker shows English text ("Choose File") - hide it and
+   put a nice Arabic button in its place. */
+function styleFileInputs(root) {
+  const scope = root || document;
+  scope.querySelectorAll('input[type="file"]').forEach((inp) => {
+    if (inp.dataset.styled) return;
+    inp.dataset.styled = '1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-outline-ad btn-sm file-pick';
+    btn.innerHTML = '📎 اختر ملف';
+    inp.parentNode.insertBefore(btn, inp);
+    inp.classList.add('file-hidden');
+    btn.addEventListener('click', () => inp.click());
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0];
+      btn.innerHTML = f ? ('📎 ' + f.name.slice(0, 28)) : '📎 اختر ملف';
+      btn.classList.add('has-file');
+    });
+  });
 }
 function closeModal() {
   const back = document.getElementById('modalBackdrop');
