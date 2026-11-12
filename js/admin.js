@@ -1576,10 +1576,16 @@ function renderAccount(c) {
     </div>
 
     <div class="card" style="margin-bottom:18px;">
-      <h3 style="font-family:var(--ad-font-head);margin-bottom:10px;">مفتاح النشر العام (Publish Key)</h3>
-      <p style="color:var(--ad-muted);font-size:13px;margin-bottom:12px;">هذا المفتاح يسمح للوحة التحكم برفع التعديلات على السيرفر عشان تشوفها <strong>كل الزوار</strong> على كل الأجهزة. لو فاضي، التعديلات هتفضل محفوظة في هذا المتصفح بس.</p>
+      <h3 style="font-family:var(--ad-font-head);margin-bottom:10px;">مفتاح استرداد الأجهزة (Recovery Key)</h3>
+      <p style="color:var(--ad-muted);font-size:13px;margin-bottom:8px;">
+        <strong>المفتاح ده مش مطلوب للنشر.</strong> النشر شغال بالفعل بحد دخلك على اللوحة — كل تعديل بتعمله بتظهر للزوار على طول.
+      </p>
+      <p style="color:var(--ad-muted);font-size:13px;margin-bottom:12px;">
+        فائدته إنك بتفعّل <strong>جهاز جديد فوراً</strong> من غير ما المدير العام يوافق عليه (بديل «كود الطلب»).
+        لو حفظته هنا، المتصفح هيفضّله ويرفعه في صفحة الدخول تلقائياً على نفس الجهاز.
+      </p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="editToken" type="password" placeholder="ألصق المفتاح هنا" value="${esc(localStorage.getItem(EDIT_TOKEN_KEY) || '')}" style="flex:1;min-width:250px;padding:10px 12px;border-radius:8px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);font-size:12px;">
+        <input id="editToken" type="password" placeholder="ألصق مفتاح الاسترداد هنا" value="${esc(localStorage.getItem(EDIT_TOKEN_KEY) || '')}" style="flex:1;min-width:250px;padding:10px 12px;border-radius:8px;border:1px solid var(--ad-line);background:var(--ad-card);color:var(--ad-ink);font-size:12px;">
         <button class="btn btn-gold" onclick="saveEditToken()">حفظ المفتاح</button>
         <button class="btn btn-outline-ad" onclick="publishNow()">نشر الآن</button>
         <button class="btn btn-danger" onclick="resetGlobal()">إعادة تعيين المحتوى العام</button>
@@ -1620,8 +1626,6 @@ function saveEditToken() {
 }
 function publishNow() {
   const st = document.getElementById('publishStatus');
-  const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
-  if (!token) { toast('ألصق مفتاح النشر أولاً', true); return; }
   if (st) st.textContent = 'جاري النشر...';
   fetch('/api/data', {
     method: 'PUT',
@@ -1636,8 +1640,6 @@ function publishNow() {
     .catch(e => { if (st) st.textContent = 'خطأ الاتصال'; toast('خطأ الاتصال بالسيرفر', true); });
 }
 function resetGlobal() {
-  const token = localStorage.getItem(EDIT_TOKEN_KEY) || '';
-  if (!token) { toast('ألصق مفتاح النشر أولاً', true); return; }
   if (!confirm('هيتمسح المحتوى المنشور على السيرفر لكل الزوار وترجع الإعدادات الافتراضية. متأكد؟')) return;
   fetch('/api/data', { method: 'DELETE', headers: sessionHeaders() })
     .then(r => r.json())
